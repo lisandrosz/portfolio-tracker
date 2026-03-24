@@ -82,9 +82,28 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
     searchTimeout.current = setTimeout(async () => {
       setSearchingSymbol(true);
       try {
-        const res = await fetch(`/api/prices/stocks/search?q=${encodeURIComponent(query)}`);
+        // For CEDEARs, search with .BA suffix and also plain query, then filter to .BA only
+        const searchQuery = form.type === "cedear" ? `${query}.BA` : query;
+        const res = await fetch(`/api/prices/stocks/search?q=${encodeURIComponent(searchQuery)}`);
         const json = await res.json();
-        setSymbolResults(json.data || []);
+        let results = json.data || [];
+        if (form.type === "cedear") {
+          // Also search plain query to get more results
+          const res2 = await fetch(`/api/prices/stocks/search?q=${encodeURIComponent(query)}`);
+          const json2 = await res2.json();
+          const extra = (json2.data || []).filter(
+            (r: { symbol: string }) => r.symbol.endsWith(".BA")
+          );
+          // Merge and deduplicate
+          const seen = new Set(results.map((r: { symbol: string }) => r.symbol));
+          for (const r of extra) {
+            if (!seen.has(r.symbol)) {
+              results.push(r);
+              seen.add(r.symbol);
+            }
+          }
+        }
+        setSymbolResults(results);
         setShowSymbolDropdown(true);
       } finally {
         setSearchingSymbol(false);
@@ -93,7 +112,14 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
   }
 
   async function selectSymbol(symbol: string, name: string) {
-    setForm((prev) => ({ ...prev, yahoo_symbol: symbol, name: name || prev.name }));
+    // Extract short ticker: "MELI.BA" -> "MELI", "AAPL" -> "AAPL"
+    const shortSymbol = symbol.replace(/\.BA$/, "");
+    setForm((prev) => ({
+      ...prev,
+      yahoo_symbol: symbol,
+      symbol: shortSymbol,
+      name: name || prev.name,
+    }));
     setSymbolQuery(symbol);
     setShowSymbolDropdown(false);
 
