@@ -130,6 +130,21 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
       const json = await res.json();
       if (json.data?.price) {
         setForm((prev) => ({ ...prev, current_price: json.data.price.toString() }));
+
+        // .BA symbols return ARS prices, force ARS currency
+        if (symbol.endsWith(".BA")) {
+          setCurrency("ARS");
+          // Fetch dolar blue if not already loaded
+          if (!dolarBlue) {
+            try {
+              const dRes = await fetch("/api/prices/dolar");
+              const dJson = await dRes.json();
+              if (dJson.data?.venta) {
+                setDolarBlue(dJson.data.venta);
+              }
+            } catch { /* ignore */ }
+          }
+        }
       }
     } finally {
       setFetchingPrice(false);
@@ -347,30 +362,38 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
 
           <div className="flex gap-2 items-center">
             <Label className="text-sm">Moneda:</Label>
-            <div className="flex rounded-lg border border-border overflow-hidden">
-              <button
-                type="button"
-                onClick={() => handleCurrencyChange("USD")}
-                className={`px-3 py-1 text-xs font-medium transition-colors ${
-                  currency === "USD"
-                    ? "bg-emerald-500 text-white"
-                    : "bg-transparent text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                USD
-              </button>
-              <button
-                type="button"
-                onClick={() => handleCurrencyChange("ARS")}
-                className={`px-3 py-1 text-xs font-medium transition-colors ${
-                  currency === "ARS"
-                    ? "bg-emerald-500 text-white"
-                    : "bg-transparent text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                ARS
-              </button>
-            </div>
+            {form.yahoo_symbol?.endsWith(".BA") ? (
+              <div className="flex rounded-lg border border-border overflow-hidden">
+                <span className="px-3 py-1 text-xs font-medium bg-emerald-500 text-white">
+                  ARS
+                </span>
+              </div>
+            ) : (
+              <div className="flex rounded-lg border border-border overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => handleCurrencyChange("USD")}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    currency === "USD"
+                      ? "bg-emerald-500 text-white"
+                      : "bg-transparent text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  USD
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCurrencyChange("ARS")}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    currency === "ARS"
+                      ? "bg-emerald-500 text-white"
+                      : "bg-transparent text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  ARS
+                </button>
+              </div>
+            )}
             {currency === "ARS" && dolarBlue && (
               <span className="text-xs text-muted-foreground">
                 Dolar blue: ${dolarBlue.toLocaleString()}
