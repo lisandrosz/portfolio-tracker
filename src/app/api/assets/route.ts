@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
       // Recalculate quantity and avg_cost from all transactions
       const txns = db
         .prepare("SELECT * FROM transactions WHERE asset_id = ?")
-        .all(assetId) as Array<{ type: string; quantity: number; price: number; total: number }>;
+        .all(assetId) as Array<{ type: string; quantity: number; price: number; total: number; fee: number }>;
 
       let totalQty = 0;
       let totalCost = 0;
@@ -96,8 +96,8 @@ export async function POST(request: NextRequest) {
 
       for (const tx of txns) {
         totalQty += tx.quantity;
-        if (["buy", "deposit", "interest", "dividend"].includes(tx.type) && tx.quantity > 0) {
-          totalCost += Math.abs(tx.total);
+        if (["buy", "deposit"].includes(tx.type) && tx.quantity > 0) {
+          totalCost += Math.abs(tx.total) + (tx.fee || 0);
           buyQty += tx.quantity;
         }
       }

@@ -21,6 +21,7 @@ function recalculateAsset(db: ReturnType<typeof getDb>, assetId: number) {
     quantity: number;
     price: number;
     total: number;
+    fee: number;
   }>;
 
   let totalQty = 0;
@@ -28,13 +29,13 @@ function recalculateAsset(db: ReturnType<typeof getDb>, assetId: number) {
 
   for (const tx of txns) {
     totalQty += tx.quantity;
-    if (["buy", "deposit", "interest", "dividend"].includes(tx.type) && tx.quantity > 0) {
-      totalCost += Math.abs(tx.total);
+    if (["buy", "deposit"].includes(tx.type) && tx.quantity > 0) {
+      totalCost += Math.abs(tx.total) + (tx.fee || 0);
     }
   }
 
   const buyQty = txns
-    .filter((t) => ["buy", "deposit", "interest", "dividend"].includes(t.type) && t.quantity > 0)
+    .filter((t) => ["buy", "deposit"].includes(t.type) && t.quantity > 0)
     .reduce((sum, t) => sum + t.quantity, 0);
 
   const avgCost = buyQty > 0 ? Math.round(totalCost / buyQty) : 0;

@@ -120,10 +120,31 @@ export function TransactionForm({
             <Label>Activo</Label>
             <Select
               value={form.asset_id}
-              onValueChange={(v) => v && setForm({ ...form, asset_id: v })}
+              onValueChange={(v) => {
+                if (!v) return;
+                const selected = assets.find((a) => a.id.toString() === v);
+                setForm({
+                  ...form,
+                  asset_id: v,
+                  price: selected?.current_price
+                    ? (selected.current_price / 100).toString()
+                    : form.price,
+                });
+              }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Seleccionar activo" />
+                <SelectValue placeholder="Seleccionar activo">
+                  {form.asset_id
+                    ? (() => {
+                        const a = assets.find(
+                          (a) => a.id.toString() === form.asset_id
+                        );
+                        return a
+                          ? `${a.symbol} - ${a.name}`
+                          : "Seleccionar activo";
+                      })()
+                    : undefined}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {assets.map((a) => (

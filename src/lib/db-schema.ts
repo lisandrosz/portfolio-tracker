@@ -62,4 +62,10 @@ export function initializeSchema(db: Database.Database) {
   if (!columns.some((c) => c.name === "yahoo_symbol")) {
     db.exec("ALTER TABLE assets ADD COLUMN yahoo_symbol TEXT");
   }
+
+  // Migration: add total_cost column to portfolio_snapshots
+  const snapshotCols = db.prepare("PRAGMA table_info(portfolio_snapshots)").all() as Array<{ name: string }>;
+  if (!snapshotCols.some((c) => c.name === "total_cost")) {
+    db.exec("ALTER TABLE portfolio_snapshots ADD COLUMN total_cost INTEGER NOT NULL DEFAULT 0");
+  }
 }

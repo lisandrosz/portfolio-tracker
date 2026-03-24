@@ -23,6 +23,7 @@ export async function DELETE(
     type: string;
     quantity: number;
     total: number;
+    fee: number;
   }>;
 
   let totalQty = 0;
@@ -31,8 +32,8 @@ export async function DELETE(
 
   for (const t of txns) {
     totalQty += t.quantity;
-    if (["buy", "deposit", "interest", "dividend"].includes(t.type) && t.quantity > 0) {
-      totalCost += Math.abs(t.total);
+    if (["buy", "deposit"].includes(t.type) && t.quantity > 0) {
+      totalCost += Math.abs(t.total) + (t.fee || 0);
       buyQty += t.quantity;
     }
   }
