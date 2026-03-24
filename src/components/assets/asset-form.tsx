@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -47,8 +47,68 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
   const [fetchingPrice, setFetchingPrice] = useState(false);
   const [currency, setCurrency] = useState<"USD" | "ARS">("USD");
   const [dolarBlue, setDolarBlue] = useState<number | null>(null);
+  const [symbolQuery, setSymbolQuery] = useState("");
+  const [symbolResults, setSymbolResults] = useState<Array<{ symbol: string; name: string; exchange: string }>>([]);
+  const [showSymbolDropdown, setShowSymbolDropdown] = useState(false);
+  const [searchingSymbol, setSearchingSymbol] = useState(false);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isEdit = !!asset;
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowSymbolDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  function handleSymbolSearch(query: string) {
+    setSymbolQuery(query);
+    setForm((prev) => ({ ...prev, yahoo_symbol: query }));
+
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+
+    if (query.length < 2) {
+      setSymbolResults([]);
+      setShowSymbolDropdown(false);
+      return;
+    }
+
+    searchTimeout.current = setTimeout(async () => {
+      setSearchingSymbol(true);
+      try {
+        const res = await fetch(`/api/prices/stocks/search?q=${encodeURIComponent(query)}`);
+        const json = await res.json();
+        setSymbolResults(json.data || []);
+        setShowSymbolDropdown(true);
+      } finally {
+        setSearchingSymbol(false);
+      }
+    }, 500);
+  }
+
+  async function selectSymbol(symbol: string, name: string) {
+    setForm((prev) => ({ ...prev, yahoo_symbol: symbol, name: name || prev.name }));
+    setSymbolQuery(symbol);
+    setShowSymbolDropdown(false);
+
+    // Auto-fetch price
+    setFetchingPrice(true);
+    try {
+      const res = await fetch(`/api/prices/stocks/quote?symbol=${encodeURIComponent(symbol)}`);
+      const json = await res.json();
+      if (json.data?.price) {
+        setForm((prev) => ({ ...prev, current_price: json.data.price.toString() }));
+      }
+    } finally {
+      setFetchingPrice(false);
+    }
+  }
 
   const fetchHistoricalPrice = useCallback(
     async (coinId: string, date: string) => {
@@ -215,17 +275,46 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
           )}
 
           {form.type === "cedear" && (
-            <div className="space-y-2">
-              <Label>Yahoo Finance Symbol</Label>
-              <Input
-                value={form.yahoo_symbol}
-                onChange={(e) =>
-                  setForm({ ...form, yahoo_symbol: e.target.value })
-                }
-                placeholder="MELI.BA"
-              />
+            <div className="space-y-2" ref={dropdownRef}>
+              <Label>Buscar Simbolo</Label>
+              <div className="relative">
+                <Input
+                  value={symbolQuery || form.yahoo_symbol}
+                  onChange={(e) => handleSymbolSearch(e.target.value)}
+                  placeholder="Busca: SPY, MELI, AAPL..."
+                  autoComplete="off"
+                />
+                {searchingSymbol && (
+                  <Loader2
+                    size={14}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
+                  />
+                )}
+                {showSymbolDropdown && symbolResults.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-white rounded-lg border border-border shadow-lg max-h-48 overflow-y-auto">
+                    {symbolResults.map((r) => (
+                      <button
+                        key={r.symbol}
+                        type="button"
+                        onClick={() => selectSymbol(r.symbol, r.name)}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center justify-between text-sm"
+                      >
+                        <div>
+                          <span className="font-medium">{r.symbol}</span>
+                          <span className="text-muted-foreground ml-2 text-xs">
+                            {r.name}
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {r.exchange}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
-                Para CEDEARs agrega .BA al final (ej: AAPL.BA, MELI.BA)
+                Escribi el nombre o ticker y selecciona de la lista
               </p>
             </div>
           )}
