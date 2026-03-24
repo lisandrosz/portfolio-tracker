@@ -5,7 +5,7 @@ App personal para llevar el seguimiento de tus inversiones. Trackea crypto, CEDE
 ## Instalacion
 
 ```bash
-git clone https://github.com/TU_USUARIO/portfolio-tracker.git
+git clone https://github.com/lisandrosz/portfolio-tracker.git
 cd portfolio-tracker
 npm install
 npm run dev
