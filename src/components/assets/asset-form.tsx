@@ -37,6 +37,7 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
     symbol: asset?.symbol || "",
     type: asset?.type || "crypto",
     coingecko_id: asset?.coingecko_id || "",
+    yahoo_symbol: asset?.yahoo_symbol || "",
     quantity: asset?.quantity?.toString() || "0",
     current_price: asset ? (asset.current_price / 100).toString() : "0",
     date: asset?.created_at ? asset.created_at.split("T")[0] : new Date().toISOString().split("T")[0],
@@ -44,6 +45,8 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
   });
 
   const [fetchingPrice, setFetchingPrice] = useState(false);
+  const [currency, setCurrency] = useState<"USD" | "ARS">("USD");
+  const [dolarBlue, setDolarBlue] = useState<number | null>(null);
 
   const isEdit = !!asset;
 
@@ -76,17 +79,36 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
     }
   }
 
+  async function handleCurrencyChange(cur: "USD" | "ARS") {
+    setCurrency(cur);
+    if (cur === "ARS" && !dolarBlue) {
+      try {
+        const res = await fetch("/api/prices/dolar");
+        const json = await res.json();
+        if (json.data?.venta) {
+          setDolarBlue(json.data.venta);
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+
+    let priceUsd = parseFloat(form.current_price) || 0;
+    if (currency === "ARS" && dolarBlue && dolarBlue > 0) {
+      priceUsd = priceUsd / dolarBlue;
+    }
 
     const body = {
       name: form.name,
       symbol: form.symbol,
       type: form.type,
       coingecko_id: form.type === "crypto" && form.coingecko_id ? form.coingecko_id : null,
+      yahoo_symbol: form.type === "cedear" && form.yahoo_symbol ? form.yahoo_symbol : null,
       quantity: parseFloat(form.quantity) || 0,
-      current_price: numberToCents(parseFloat(form.current_price) || 0),
+      current_price: numberToCents(priceUsd),
       date: form.date,
       notes: form.notes || null,
     };
@@ -192,6 +214,55 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
             </div>
           )}
 
+          {form.type === "cedear" && (
+            <div className="space-y-2">
+              <Label>Yahoo Finance Symbol</Label>
+              <Input
+                value={form.yahoo_symbol}
+                onChange={(e) =>
+                  setForm({ ...form, yahoo_symbol: e.target.value })
+                }
+                placeholder="MELI.BA"
+              />
+              <p className="text-xs text-muted-foreground">
+                Para CEDEARs agrega .BA al final (ej: AAPL.BA, MELI.BA)
+              </p>
+            </div>
+          )}
+
+          <div className="flex gap-2 items-center">
+            <Label className="text-sm">Moneda:</Label>
+            <div className="flex rounded-lg border border-border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => handleCurrencyChange("USD")}
+                className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  currency === "USD"
+                    ? "bg-emerald-500 text-white"
+                    : "bg-transparent text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                USD
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCurrencyChange("ARS")}
+                className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  currency === "ARS"
+                    ? "bg-emerald-500 text-white"
+                    : "bg-transparent text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                ARS
+              </button>
+            </div>
+            {currency === "ARS" && dolarBlue && (
+              <span className="text-xs text-muted-foreground">
+                Dolar blue: ${dolarBlue.toLocaleString()}
+              </span>
+            )}
+          </div>
+
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label>Cantidad</Label>
@@ -203,7 +274,7 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
               />
             </div>
             <div className="space-y-2">
-              <Label>Precio (USD)</Label>
+              <Label>Precio ({currency})</Label>
               <div className="relative">
                 <Input
                   type="number"

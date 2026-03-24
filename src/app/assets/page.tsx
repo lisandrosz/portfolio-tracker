@@ -20,7 +20,10 @@ export default function AssetsPage() {
   async function refreshPrices() {
     setRefreshing(true);
     try {
-      await fetch("/api/prices/crypto", { method: "POST" });
+      await Promise.all([
+        fetch("/api/prices/crypto", { method: "POST" }),
+        fetch("/api/prices/stocks", { method: "POST" }),
+      ]);
       await refetch();
     } finally {
       setRefreshing(false);

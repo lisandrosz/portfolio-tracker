@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
+import { autoSnapshot } from "@/lib/snapshot";
 import { z } from "zod";
 
 const createAssetSchema = z.object({
@@ -7,6 +8,7 @@ const createAssetSchema = z.object({
   symbol: z.string().min(1),
   type: z.enum(["crypto", "cedear", "plazo_fijo", "cash_usd", "cash_ars", "other"]),
   coingecko_id: z.string().nullable().optional(),
+  yahoo_symbol: z.string().nullable().optional(),
   quantity: z.number().default(0),
   current_price: z.number().default(0), // in cents
   date: z.string().optional(),
@@ -48,14 +50,15 @@ export async function POST(request: NextRequest) {
       // Create new asset
       const result = db
         .prepare(
-          `INSERT INTO assets (name, symbol, type, coingecko_id, quantity, current_price, notes, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO assets (name, symbol, type, coingecko_id, yahoo_symbol, quantity, current_price, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           data.name,
           symbol,
           data.type,
           data.coingecko_id ?? null,
+          data.yahoo_symbol ?? null,
           data.quantity,
           data.current_price,
           data.notes ?? null,
@@ -109,6 +112,8 @@ export async function POST(request: NextRequest) {
     const asset = db
       .prepare("SELECT * FROM assets WHERE id = ?")
       .get(assetId);
+
+    autoSnapshot();
 
     return Response.json({ data: asset }, { status: 201 });
   } catch (err) {

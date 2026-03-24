@@ -37,6 +37,8 @@ export function TransactionForm({
 }: TransactionFormProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [currency, setCurrency] = useState<"USD" | "ARS">("USD");
+  const [dolarBlue, setDolarBlue] = useState<number | null>(null);
   const [form, setForm] = useState({
     asset_id: defaultAssetId?.toString() || "",
     type: "buy",
@@ -47,16 +49,36 @@ export function TransactionForm({
     notes: "",
   });
 
+  async function handleCurrencyChange(cur: "USD" | "ARS") {
+    setCurrency(cur);
+    if (cur === "ARS" && !dolarBlue) {
+      try {
+        const res = await fetch("/api/prices/dolar");
+        const json = await res.json();
+        if (json.data?.venta) {
+          setDolarBlue(json.data.venta);
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+
+    let priceUsd = parseFloat(form.price);
+    let feeUsd = parseFloat(form.fee) || 0;
+    if (currency === "ARS" && dolarBlue && dolarBlue > 0) {
+      priceUsd = priceUsd / dolarBlue;
+      feeUsd = feeUsd / dolarBlue;
+    }
 
     const body = {
       asset_id: parseInt(form.asset_id),
       type: form.type,
       quantity: parseFloat(form.quantity),
-      price: numberToCents(parseFloat(form.price)),
-      fee: numberToCents(parseFloat(form.fee) || 0),
+      price: numberToCents(priceUsd),
+      fee: numberToCents(feeUsd),
       date: form.date,
       notes: form.notes || null,
     };
@@ -132,6 +154,39 @@ export function TransactionForm({
             </Select>
           </div>
 
+          <div className="flex gap-2 items-center">
+            <Label className="text-sm">Moneda:</Label>
+            <div className="flex rounded-lg border border-border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => handleCurrencyChange("USD")}
+                className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  currency === "USD"
+                    ? "bg-emerald-500 text-white"
+                    : "bg-transparent text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                USD
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCurrencyChange("ARS")}
+                className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  currency === "ARS"
+                    ? "bg-emerald-500 text-white"
+                    : "bg-transparent text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                ARS
+              </button>
+            </div>
+            {currency === "ARS" && dolarBlue && (
+              <span className="text-xs text-muted-foreground">
+                Dolar blue: ${dolarBlue.toLocaleString()}
+              </span>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Cantidad</Label>
@@ -145,7 +200,7 @@ export function TransactionForm({
               />
             </div>
             <div className="space-y-2">
-              <Label>Precio por unidad (USD)</Label>
+              <Label>Precio por unidad ({currency})</Label>
               <Input
                 type="number"
                 step="any"

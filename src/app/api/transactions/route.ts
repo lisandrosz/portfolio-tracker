@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
+import { autoSnapshot } from "@/lib/snapshot";
 import { z } from "zod";
 
 const createTransactionSchema = z.object({
@@ -121,6 +122,8 @@ export async function POST(request: NextRequest) {
         "SELECT t.*, a.name as asset_name, a.symbol as asset_symbol FROM transactions t JOIN assets a ON t.asset_id = a.id WHERE t.id = ?"
       )
       .get(result.lastInsertRowid);
+
+    autoSnapshot();
 
     return Response.json({ data: transaction }, { status: 201 });
   } catch (err) {

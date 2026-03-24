@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
+import { autoSnapshot } from "@/lib/snapshot";
 
 export async function DELETE(
   _req: NextRequest,
@@ -40,6 +41,8 @@ export async function DELETE(
   db.prepare(
     "UPDATE assets SET quantity = ?, avg_cost = ?, updated_at = datetime('now') WHERE id = ?"
   ).run(Math.max(0, totalQty), avgCost, tx.asset_id);
+
+  autoSnapshot();
 
   return Response.json({ data: { deleted: true } });
 }

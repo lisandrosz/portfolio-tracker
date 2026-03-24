@@ -56,4 +56,10 @@ export function initializeSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_price_history_asset_date ON price_history(asset_id, date);
     CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_date ON portfolio_snapshots(date);
   `);
+
+  // Migration: add yahoo_symbol column if it doesn't exist
+  const columns = db.prepare("PRAGMA table_info(assets)").all() as Array<{ name: string }>;
+  if (!columns.some((c) => c.name === "yahoo_symbol")) {
+    db.exec("ALTER TABLE assets ADD COLUMN yahoo_symbol TEXT");
+  }
 }

@@ -1,27 +1,35 @@
 import getDb from "@/lib/db";
-import type { Asset } from "@/types";
+import { autoSnapshot } from "@/lib/snapshot";
 
-export async function POST() {
+// Auto-snapshot: creates one for this month if it doesn't exist
+export async function GET() {
   const db = getDb();
-  const assets = db.prepare("SELECT * FROM assets WHERE quantity > 0").all() as Asset[];
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  let totalValue = 0;
-  const breakdown: Record<string, number> = {};
+  const existing = db
+    .prepare("SELECT * FROM portfolio_snapshots WHERE date LIKE ?")
+    .get(`${monthKey}%`);
 
-  for (const asset of assets) {
-    const value = Math.round(asset.quantity * asset.current_price);
-    totalValue += value;
-    breakdown[asset.type] = (breakdown[asset.type] || 0) + value;
+  if (existing) {
+    return Response.json({ data: { created: false, snapshot: existing } });
   }
 
+  autoSnapshot();
+
+  const today = now.toISOString().split("T")[0];
+  const snapshot = db
+    .prepare("SELECT * FROM portfolio_snapshots WHERE date = ?")
+    .get(today);
+
+  return Response.json({ data: { created: true, snapshot } });
+}
+
+export async function POST() {
+  autoSnapshot();
+
+  const db = getDb();
   const today = new Date().toISOString().split("T")[0];
-
-  db.prepare(
-    `INSERT INTO portfolio_snapshots (total_value, date, breakdown)
-     VALUES (?, ?, ?)
-     ON CONFLICT(date) DO UPDATE SET total_value = ?, breakdown = ?`
-  ).run(totalValue, today, JSON.stringify(breakdown), totalValue, JSON.stringify(breakdown));
-
   const snapshot = db
     .prepare("SELECT * FROM portfolio_snapshots WHERE date = ?")
     .get(today);

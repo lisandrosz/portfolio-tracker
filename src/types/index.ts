@@ -6,6 +6,7 @@ export interface Asset {
   symbol: string;
   type: AssetType;
   coingecko_id: string | null;
+  yahoo_symbol: string | null;
   quantity: number;
   avg_cost: number; // stored as cents
   current_price: number; // stored as cents

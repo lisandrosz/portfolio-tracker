@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RefreshCw, Camera } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { PortfolioSummary, Transaction } from "@/types";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 
 export default function DashboardPage() {
@@ -24,13 +24,25 @@ export default function DashboardPage() {
     refetch: refetchTx,
   } = useFetch<Transaction[]>("/api/transactions?limit=5");
 
+  // Auto-snapshot: create one for this month if it doesn't exist
+  const snapshotChecked = useRef(false);
+  useEffect(() => {
+    if (!snapshotChecked.current) {
+      snapshotChecked.current = true;
+      fetch("/api/portfolio/snapshot").catch(() => {});
+    }
+  }, []);
+
   const [refreshing, setRefreshing] = useState(false);
   const [snapshotting, setSnapshotting] = useState(false);
 
   async function refreshPrices() {
     setRefreshing(true);
     try {
-      await fetch("/api/prices/crypto", { method: "POST" });
+      await Promise.all([
+        fetch("/api/prices/crypto", { method: "POST" }),
+        fetch("/api/prices/stocks", { method: "POST" }),
+      ]);
       await refetchSummary();
     } finally {
       setRefreshing(false);
