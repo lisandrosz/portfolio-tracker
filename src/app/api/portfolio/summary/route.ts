@@ -11,9 +11,20 @@ export async function GET() {
   let totalCost = 0;
   const allocationByType: Record<string, number> = {};
 
+  // Get interest/dividend income per asset
+  const incomeByAsset = new Map<number, number>();
+  const incomeTxns = db
+    .prepare("SELECT asset_id, SUM(total) as total_income FROM transactions WHERE type IN ('interest', 'dividend') GROUP BY asset_id")
+    .all() as Array<{ asset_id: number; total_income: number }>;
+  for (const row of incomeTxns) {
+    incomeByAsset.set(row.asset_id, row.total_income || 0);
+  }
+
   const assetsWithValue = assets.map((asset) => {
     const currentValue = Math.round(asset.quantity * asset.current_price);
-    const assetTotalCost = Math.round(asset.quantity * asset.avg_cost);
+    const rawCost = Math.round(asset.quantity * asset.avg_cost);
+    const interestIncome = incomeByAsset.get(asset.id) || 0;
+    const assetTotalCost = rawCost - interestIncome;
     const profitLoss = currentValue - assetTotalCost;
     const profitLossPct = assetTotalCost > 0 ? (profitLoss / assetTotalCost) * 100 : 0;
 
