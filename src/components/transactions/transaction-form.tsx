@@ -66,22 +66,44 @@ export function TransactionForm({
     e.preventDefault();
     setLoading(true);
 
-    let priceUsd = parseFloat(form.price);
+    const isIncomeType = ["interest", "dividend"].includes(form.type);
     let feeUsd = parseFloat(form.fee) || 0;
     if (currency === "ARS" && dolarBlue && dolarBlue > 0) {
-      priceUsd = priceUsd / dolarBlue;
       feeUsd = feeUsd / dolarBlue;
     }
 
-    const body = {
-      asset_id: parseInt(form.asset_id),
-      type: form.type,
-      quantity: parseFloat(form.quantity),
-      price: numberToCents(priceUsd),
-      fee: numberToCents(feeUsd),
-      date: form.date,
-      notes: form.notes || null,
-    };
+    let body;
+    if (isIncomeType) {
+      // Interest/dividend: quantity=0, price=0, total=monto
+      let montoUsd = parseFloat(form.price);
+      if (currency === "ARS" && dolarBlue && dolarBlue > 0) {
+        montoUsd = montoUsd / dolarBlue;
+      }
+      body = {
+        asset_id: parseInt(form.asset_id),
+        type: form.type,
+        quantity: 0,
+        price: 0,
+        total: numberToCents(montoUsd),
+        fee: numberToCents(feeUsd),
+        date: form.date,
+        notes: form.notes || null,
+      };
+    } else {
+      let priceUsd = parseFloat(form.price);
+      if (currency === "ARS" && dolarBlue && dolarBlue > 0) {
+        priceUsd = priceUsd / dolarBlue;
+      }
+      body = {
+        asset_id: parseInt(form.asset_id),
+        type: form.type,
+        quantity: parseFloat(form.quantity),
+        price: numberToCents(priceUsd),
+        fee: numberToCents(feeUsd),
+        date: form.date,
+        notes: form.notes || null,
+      };
+    }
 
     try {
       await fetch("/api/transactions", {
@@ -133,18 +155,7 @@ export function TransactionForm({
               }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Seleccionar activo">
-                  {form.asset_id
-                    ? (() => {
-                        const a = assets.find(
-                          (a) => a.id.toString() === form.asset_id
-                        );
-                        return a
-                          ? `${a.symbol} - ${a.name}`
-                          : "Seleccionar activo";
-                      })()
-                    : undefined}
-                </SelectValue>
+                <SelectValue placeholder="Seleccionar activo" />
               </SelectTrigger>
               <SelectContent>
                 {assets.map((a) => (
@@ -208,30 +219,44 @@ export function TransactionForm({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          {["interest", "dividend"].includes(form.type) ? (
             <div className="space-y-2">
-              <Label>Cantidad</Label>
-              <Input
-                type="number"
-                step="any"
-                value={form.quantity}
-                onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-                placeholder="0.05"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Precio por unidad ({currency})</Label>
+              <Label>Monto ganado ({currency})</Label>
               <Input
                 type="number"
                 step="any"
                 value={form.price}
                 onChange={(e) => setForm({ ...form, price: e.target.value })}
-                placeholder="67500"
+                placeholder="250"
                 required
               />
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Cantidad</Label>
+                <Input
+                  type="number"
+                  step="any"
+                  value={form.quantity}
+                  onChange={(e) => setForm({ ...form, quantity: e.target.value })}
+                  placeholder="0.05"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Precio por unidad ({currency})</Label>
+                <Input
+                  type="number"
+                  step="any"
+                  value={form.price}
+                  onChange={(e) => setForm({ ...form, price: e.target.value })}
+                  placeholder="67500"
+                  required
+                />
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -254,14 +279,14 @@ export function TransactionForm({
             </div>
           </div>
 
-          {form.quantity && form.price && (
+          {(["interest", "dividend"].includes(form.type) ? form.price : form.quantity && form.price) && (
             <div className="rounded-md bg-muted p-3 text-sm">
               Total:{" "}
               <span className="font-mono font-medium">
                 $
-                {(
-                  parseFloat(form.quantity) * parseFloat(form.price)
-                ).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                {["interest", "dividend"].includes(form.type)
+                  ? parseFloat(form.price || "0").toLocaleString("en-US", { minimumFractionDigits: 2 })
+                  : (parseFloat(form.quantity) * parseFloat(form.price)).toLocaleString("en-US", { minimumFractionDigits: 2 })}
               </span>
             </div>
           )}

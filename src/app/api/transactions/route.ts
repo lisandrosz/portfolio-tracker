@@ -8,6 +8,7 @@ const createTransactionSchema = z.object({
   type: z.enum(["buy", "sell", "deposit", "withdrawal", "interest", "dividend"]),
   quantity: z.number(),
   price: z.number(), // cents
+  total: z.number().optional(), // cents, used for interest/dividend
   fee: z.number().default(0),
   date: z.string(),
   notes: z.string().nullable().optional(),
@@ -28,6 +29,7 @@ function recalculateAsset(db: ReturnType<typeof getDb>, assetId: number) {
   let totalCost = 0;
 
   for (const tx of txns) {
+    // Interest/dividend don't affect quantity (they have qty=0)
     totalQty += tx.quantity;
     if (["buy", "deposit"].includes(tx.type) && tx.quantity > 0) {
       totalCost += Math.abs(tx.total) + (tx.fee || 0);
@@ -93,12 +95,17 @@ export async function POST(request: NextRequest) {
     const asset = db.prepare("SELECT * FROM assets WHERE id = ?").get(data.asset_id);
     if (!asset) return Response.json({ error: "Asset not found" }, { status: 404 });
 
-    // For sell/withdrawal, quantity should be negative
-    const qty =
-      ["sell", "withdrawal"].includes(data.type)
+    // For interest/dividend: quantity=0, total=provided amount
+    // For sell/withdrawal: quantity is negative
+    const isIncomeType = ["interest", "dividend"].includes(data.type);
+    const qty = isIncomeType
+      ? 0
+      : ["sell", "withdrawal"].includes(data.type)
         ? -Math.abs(data.quantity)
         : Math.abs(data.quantity);
-    const total = Math.round(Math.abs(qty) * data.price);
+    const total = isIncomeType && data.total
+      ? data.total
+      : Math.round(Math.abs(qty) * data.price);
 
     const result = db
       .prepare(
