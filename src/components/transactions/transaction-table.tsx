@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
 import { TRANSACTION_TYPES } from "@/lib/constants";
-import { centsToUsd, formatDate, formatQuantity } from "@/lib/formatters";
+import { formatMoney, formatDate, formatQuantity } from "@/lib/formatters";
 import type { Transaction } from "@/types";
 import type { TransactionType } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -44,7 +44,7 @@ export function TransactionTable({
   }
 
   return (
-    <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
       <Table>
         <TableHeader>
           <TableRow>
@@ -87,13 +87,13 @@ export function TransactionTable({
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right font-mono">
-                  {formatQuantity(Math.abs(tx.quantity))}
+                  {tx.quantity !== 0 ? formatQuantity(Math.abs(tx.quantity)) : "—"}
                 </TableCell>
                 <TableCell className="text-right font-mono">
-                  {centsToUsd(tx.price)}
+                  {tx.price > 0 ? formatMoney(tx.price, tx.currency) : "—"}
                 </TableCell>
                 <TableCell className="text-right font-mono font-medium">
-                  {centsToUsd(tx.total)}
+                  {formatMoney(tx.total, tx.currency)}
                 </TableCell>
                 <TableCell>
                   <Button

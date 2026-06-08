@@ -8,6 +8,9 @@ export function initializeSchema(db: Database.Database) {
       symbol          TEXT NOT NULL,
       type            TEXT NOT NULL,
       coingecko_id    TEXT,
+      fund_name       TEXT,
+      currency        TEXT NOT NULL DEFAULT 'USD',
+      change_24h      REAL,
       quantity        REAL NOT NULL DEFAULT 0,
       avg_cost        INTEGER NOT NULL DEFAULT 0,
       current_price   INTEGER NOT NULL DEFAULT 0,
@@ -24,6 +27,8 @@ export function initializeSchema(db: Database.Database) {
       quantity    REAL NOT NULL,
       price       INTEGER NOT NULL,
       total       INTEGER NOT NULL,
+      total_usd   INTEGER NOT NULL DEFAULT 0,
+      currency    TEXT NOT NULL DEFAULT 'USD',
       fee         INTEGER NOT NULL DEFAULT 0,
       date        TEXT NOT NULL,
       notes       TEXT,
@@ -57,10 +62,28 @@ export function initializeSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_date ON portfolio_snapshots(date);
   `);
 
-  // Migration: add yahoo_symbol column if it doesn't exist
-  const columns = db.prepare("PRAGMA table_info(assets)").all() as Array<{ name: string }>;
-  if (!columns.some((c) => c.name === "yahoo_symbol")) {
-    db.exec("ALTER TABLE assets ADD COLUMN yahoo_symbol TEXT");
+  // --- Migrations for existing databases ---
+  const assetCols = db.prepare("PRAGMA table_info(assets)").all() as Array<{ name: string }>;
+  const hasAssetCol = (n: string) => assetCols.some((c) => c.name === n);
+  if (!hasAssetCol("fund_name")) {
+    db.exec("ALTER TABLE assets ADD COLUMN fund_name TEXT");
+  }
+  if (!hasAssetCol("currency")) {
+    db.exec("ALTER TABLE assets ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'");
+  }
+  if (!hasAssetCol("change_24h")) {
+    db.exec("ALTER TABLE assets ADD COLUMN change_24h REAL");
+  }
+
+  const txCols = db.prepare("PRAGMA table_info(transactions)").all() as Array<{ name: string }>;
+  const hasTxCol = (n: string) => txCols.some((c) => c.name === n);
+  if (!hasTxCol("currency")) {
+    db.exec("ALTER TABLE transactions ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'");
+  }
+  if (!hasTxCol("total_usd")) {
+    db.exec("ALTER TABLE transactions ADD COLUMN total_usd INTEGER NOT NULL DEFAULT 0");
+    // Backfill: existing rows were stored in USD cents already.
+    db.exec("UPDATE transactions SET total_usd = total WHERE total_usd = 0");
   }
 
   // Migration: add total_cost column to portfolio_snapshots

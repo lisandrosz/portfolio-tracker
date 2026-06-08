@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
-import { Sidebar } from "@/components/layout/sidebar";
+import { BalanceProvider } from "@/components/home/balance-context";
 import "./globals.css";
 
 const inter = Inter({
@@ -14,8 +14,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Portfolio Tracker",
-  description: "Personal investment portfolio tracker",
+  title: "Mi Portfolio",
+  description: "Seguimiento de inversiones",
 };
 
 export default function RootLayout({
@@ -26,13 +26,12 @@ export default function RootLayout({
   return (
     <html
       lang="es"
-      className={`${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      className={`dark ${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-background text-foreground">
-        <Sidebar />
-        <main className="md:ml-64 min-h-screen">
-          <div className="p-4 md:p-8">{children}</div>
-        </main>
+        <BalanceProvider>
+          <main className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-10">{children}</main>
+        </BalanceProvider>
       </body>
     </html>
   );

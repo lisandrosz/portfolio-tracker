@@ -1,5 +1,6 @@
 import getDb from "@/lib/db";
 import { fetchCryptoPrices } from "@/lib/coingecko";
+import { autoSnapshot } from "@/lib/snapshot";
 import { numberToCents } from "@/lib/formatters";
 import type { Asset } from "@/types";
 
@@ -13,8 +14,8 @@ export async function POST() {
 
   if (lastFetch) {
     const elapsed = Date.now() - new Date(lastFetch.value).getTime();
-    if (elapsed < 60_000) {
-      // 1 min cooldown
+    if (elapsed < 20_000) {
+      // 20s cooldown (CoinGecko response is cached ~25s anyway)
       return Response.json({
         data: { updated: 0, message: "Rate limited, try again later" },
       });
@@ -43,7 +44,7 @@ export async function POST() {
   let updated = 0;
 
   const updateStmt = db.prepare(
-    "UPDATE assets SET current_price = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+    "UPDATE assets SET current_price = ?, change_24h = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
   );
   const historyStmt = db.prepare(
     "INSERT INTO price_history (asset_id, price, date) VALUES (?, ?, ?) ON CONFLICT(asset_id, date) DO UPDATE SET price = ?"
@@ -54,7 +55,8 @@ export async function POST() {
       const priceData = prices[asset.coingecko_id!];
       if (priceData?.usd) {
         const priceCents = numberToCents(priceData.usd);
-        updateStmt.run(priceCents, asset.id);
+        const change = priceData.usd_24h_change ?? null;
+        updateStmt.run(priceCents, change, asset.id);
         historyStmt.run(asset.id, priceCents, today, priceCents);
         updated++;
       }
@@ -67,6 +69,8 @@ export async function POST() {
   db.prepare(
     "INSERT INTO settings (key, value) VALUES ('last_crypto_update', ?) ON CONFLICT(key) DO UPDATE SET value = ?"
   ).run(new Date().toISOString(), new Date().toISOString());
+
+  await autoSnapshot();
 
   return Response.json({ data: { updated } });
 }

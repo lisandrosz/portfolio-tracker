@@ -6,12 +6,10 @@ import { z } from "zod";
 const updateAssetSchema = z.object({
   name: z.string().min(1).optional(),
   symbol: z.string().min(1).optional(),
-  type: z.enum(["crypto", "cedear", "plazo_fijo", "cash_usd", "cash_ars", "other"]).optional(),
+  type: z.enum(["crypto", "fci", "managed", "plazo_fijo", "cash_usd", "cash_ars"]).optional(),
   coingecko_id: z.string().nullable().optional(),
-  yahoo_symbol: z.string().nullable().optional(),
-  quantity: z.number().optional(),
-  avg_cost: z.number().optional(),
-  current_price: z.number().optional(),
+  fund_name: z.string().nullable().optional(),
+  current_price: z.number().optional(), // native cents (manual balance / valuation for box assets)
   notes: z.string().nullable().optional(),
 });
 
@@ -54,16 +52,18 @@ export async function PUT(
       }
     }
 
+    if (data.current_price !== undefined) {
+      fields.push("price_updated_at = datetime('now')");
+    }
+
     if (fields.length > 0) {
       fields.push("updated_at = datetime('now')");
       values.push(id);
-      db.prepare(`UPDATE assets SET ${fields.join(", ")} WHERE id = ?`).run(
-        ...values
-      );
+      db.prepare(`UPDATE assets SET ${fields.join(", ")} WHERE id = ?`).run(...values);
     }
 
     const updated = db.prepare("SELECT * FROM assets WHERE id = ?").get(id);
-    autoSnapshot();
+    await autoSnapshot();
     return Response.json({ data: updated });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -82,6 +82,6 @@ export async function DELETE(
   const result = db.prepare("DELETE FROM assets WHERE id = ?").run(id);
   if (result.changes === 0)
     return Response.json({ error: "Not found" }, { status: 404 });
-  autoSnapshot();
+  await autoSnapshot();
   return Response.json({ data: { deleted: true } });
 }

@@ -1,140 +1,112 @@
 "use client";
 
-import { useFetch } from "@/hooks/use-fetch";
-import { PortfolioSummaryCards } from "@/components/dashboard/portfolio-summary-cards";
-import { AllocationChart } from "@/components/charts/allocation-chart";
-import { TransactionTable } from "@/components/transactions/transaction-table";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { RefreshCw, Camera } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
-import type { PortfolioSummary, Transaction } from "@/types";
-import { useState, useEffect, useRef } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { PortfolioHeader } from "@/components/home/portfolio-header";
+import { HistoryChart } from "@/components/home/history-chart";
+import { AllocationDonut } from "@/components/home/allocation-donut";
+import { HoldingsPanel } from "@/components/home/holdings-panel";
+import { MovementsModal } from "@/components/home/movements-modal";
+import { SettingsModal } from "@/components/home/settings-modal";
+import type { PortfolioSummary } from "@/types";
 
-export default function DashboardPage() {
-  const {
-    data: summary,
-    loading: summaryLoading,
-    refetch: refetchSummary,
-  } = useFetch<PortfolioSummary>("/api/portfolio/summary");
-  const {
-    data: transactions,
-    loading: txLoading,
-    refetch: refetchTx,
-  } = useFetch<Transaction[]>("/api/transactions?limit=5");
+export default function HomePage() {
+  const [summary, setSummary] = useState<PortfolioSummary | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [chartKey, setChartKey] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [movementsOpen, setMovementsOpen] = useState(false);
+  const tickRef = useRef(0);
 
-  // Auto-snapshot: create one for this month if it doesn't exist
-  const snapshotChecked = useRef(false);
-  useEffect(() => {
-    if (!snapshotChecked.current) {
-      snapshotChecked.current = true;
-      fetch("/api/portfolio/snapshot").catch(() => {});
+  const loadSummary = useCallback(async () => {
+    const res = await fetch("/api/portfolio/summary");
+    const json = await res.json();
+    if (json.data) {
+      setSummary(json.data);
+      setLastUpdated(Date.now());
     }
   }, []);
 
-  const [refreshing, setRefreshing] = useState(false);
-  const [snapshotting, setSnapshotting] = useState(false);
+  // Refresh live prices (crypto + bingx every tick; fci occasionally).
+  const refreshPrices = useCallback(async (includeFci = false) => {
+    const calls = [
+      fetch("/api/prices/crypto", { method: "POST" }),
+      fetch("/api/prices/bingx", { method: "POST" }),
+    ];
+    if (includeFci) calls.push(fetch("/api/prices/fci", { method: "POST" }));
+    await Promise.allSettled(calls);
+    await loadSummary();
+    setChartKey((k) => k + 1);
+  }, [loadSummary]);
 
-  async function refreshPrices() {
-    setRefreshing(true);
-    try {
-      await Promise.all([
-        fetch("/api/prices/crypto", { method: "POST" }),
-        fetch("/api/prices/stocks", { method: "POST" }),
-      ]);
-      await refetchSummary();
-    } finally {
-      setRefreshing(false);
+  // After data changes (add/edit/delete): rebuild history, then reload.
+  const onDataChanged = useCallback(async () => {
+    await loadSummary();
+    setChartKey((k) => k + 1);
+    // Rebuild historical curve in the background.
+    fetch("/api/portfolio/rebuild", { method: "POST" })
+      .then(() => {
+        loadSummary();
+        setChartKey((k) => k + 1);
+      })
+      .catch(() => {});
+  }, [loadSummary]);
+
+  // Initial load + 30s poller (paused when tab hidden).
+  useEffect(() => {
+    refreshPrices(true);
+
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      tickRef.current += 1;
+      const includeFci = tickRef.current % 20 === 0; // ~every 10 min
+      refreshPrices(includeFci);
+    }, 30_000);
+
+    function onVisible() {
+      if (!document.hidden) refreshPrices();
     }
-  }
+    document.addEventListener("visibilitychange", onVisible);
 
-  async function takeSnapshot() {
-    setSnapshotting(true);
-    try {
-      await fetch("/api/portfolio/snapshot", { method: "POST" });
-    } finally {
-      setSnapshotting(false);
-    }
-  }
-
-  function refetchAll() {
-    refetchSummary();
-    refetchTx();
-  }
-
-  if (summaryLoading) {
-    return (
-      <div className="space-y-6 pt-12 md:pt-0">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} className="h-[120px] rounded-lg" />
-          ))}
-        </div>
-      </div>
-    );
-  }
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshPrices]);
 
   return (
-    <div className="space-y-6 pt-12 md:pt-0">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refreshPrices}
-            disabled={refreshing}
-          >
-            <RefreshCw
-              size={14}
-              className={refreshing ? "animate-spin mr-2" : "mr-2"}
-            />
-            {refreshing ? "Actualizando..." : "Actualizar Precios"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={takeSnapshot}
-            disabled={snapshotting}
-          >
-            <Camera size={14} className="mr-2" />
-            {snapshotting ? "Guardando..." : "Snapshot"}
-          </Button>
+    <>
+      <div className="space-y-6">
+        <PortfolioHeader
+          summary={summary}
+          lastUpdated={lastUpdated}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <HistoryChart refreshKey={chartKey} />
+          <AllocationDonut
+            assets={summary?.assets || []}
+            totalValue={summary?.total_value || 0}
+          />
         </div>
+
+        <HoldingsPanel
+          assets={summary?.assets || []}
+          onRefresh={onDataChanged}
+          onOpenMovements={() => setMovementsOpen(true)}
+        />
       </div>
 
-      {summary && <PortfolioSummaryCards summary={summary} />}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {summary && (
-          <AllocationChart allocationByType={summary.allocation_by_type} />
-        )}
-
-        <Card className="border-0 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg">Ultimas Transacciones</CardTitle>
-            <Link href="/transactions">
-              <Button variant="ghost" size="sm">
-                Ver todas
-              </Button>
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {txLoading ? (
-              <Skeleton className="h-[200px]" />
-            ) : (
-              <TransactionTable
-                transactions={transactions || []}
-                onRefresh={refetchAll}
-              />
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+      <MovementsModal
+        open={movementsOpen}
+        onOpenChange={setMovementsOpen}
+        onChanged={onDataChanged}
+      />
+      <SettingsModal
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        onChanged={onDataChanged}
+      />
+    </>
   );
 }

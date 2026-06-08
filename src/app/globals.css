@@ -49,43 +49,47 @@
 }
 
 :root {
-  --background: #f0f4f3;
-  --foreground: #1a1a2e;
-  --card: #ffffff;
-  --card-foreground: #1a1a2e;
-  --popover: #ffffff;
-  --popover-foreground: #1a1a2e;
-  --primary: #1a1a2e;
-  --primary-foreground: #ffffff;
-  --secondary: #e8f5e9;
-  --secondary-foreground: #1a1a2e;
-  --muted: #f0f4f3;
-  --muted-foreground: #6b7280;
-  --accent: #e8f5e9;
-  --accent-foreground: #1a1a2e;
+  /* Dark fintech theme */
+  --background: #0a0a0f;
+  --foreground: #ededf2;
+  --card: #15151c;
+  --card-foreground: #ededf2;
+  --popover: #15151c;
+  --popover-foreground: #ededf2;
+  --primary: #f59e0b; /* amber accent */
+  --primary-foreground: #1a1206;
+  --secondary: #1e1e27;
+  --secondary-foreground: #ededf2;
+  --muted: #1a1a22;
+  --muted-foreground: #9595a0;
+  --accent: #23232e;
+  --accent-foreground: #ededf2;
   --destructive: #ef4444;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #10b981;
-  --chart-1: #10b981;
-  --chart-2: #3b82f6;
-  --chart-3: #f59e0b;
-  --chart-4: #8b5cf6;
-  --chart-5: #ef4444;
+  --border: #262630;
+  --input: #262630;
+  --ring: #f59e0b;
+  --chart-1: #22c55e; /* green (gains) */
+  --chart-2: #f59e0b; /* amber */
+  --chart-3: #fb923c; /* orange */
+  --chart-4: #ec4899; /* pink */
+  --chart-5: #a78bfa; /* violet */
   --radius: 0.75rem;
-  --sidebar: #ffffff;
-  --sidebar-foreground: #1a1a2e;
-  --sidebar-primary: #10b981;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e8f5e9;
-  --sidebar-accent-foreground: #1a1a2e;
-  --sidebar-border: #e2e8f0;
-  --sidebar-ring: #10b981;
+  --sidebar: #15151c;
+  --sidebar-foreground: #ededf2;
+  --sidebar-primary: #f59e0b;
+  --sidebar-primary-foreground: #1a1206;
+  --sidebar-accent: #23232e;
+  --sidebar-accent-foreground: #ededf2;
+  --sidebar-border: #262630;
+  --sidebar-ring: #f59e0b;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: dark;
   }
   body {
     @apply bg-background text-foreground;

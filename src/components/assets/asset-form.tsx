@@ -19,7 +19,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ASSET_TYPES, POPULAR_CRYPTOS } from "@/lib/constants";
+import {
+  ASSET_TYPES,
+  ASSET_CURRENCY,
+  POPULAR_CRYPTOS,
+  isBoxType,
+  type AssetType,
+} from "@/lib/constants";
 import { numberToCents } from "@/lib/formatters";
 import { Plus, Pencil, Loader2 } from "lucide-react";
 import type { Asset } from "@/types";
@@ -30,203 +36,101 @@ interface AssetFormProps {
 }
 
 export function AssetForm({ asset, onSaved }: AssetFormProps) {
+  const isEdit = !!asset;
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [fetchingPrice, setFetchingPrice] = useState(false);
+
   const [form, setForm] = useState({
     name: asset?.name || "",
     symbol: asset?.symbol || "",
-    type: asset?.type || "crypto",
+    type: (asset?.type || "crypto") as AssetType,
     coingecko_id: asset?.coingecko_id || "",
-    yahoo_symbol: asset?.yahoo_symbol || "",
-    quantity: asset?.quantity?.toString() || "0",
-    current_price: asset ? (asset.current_price / 100).toString() : "0",
-    date: asset?.created_at ? asset.created_at.split("T")[0] : new Date().toISOString().split("T")[0],
+    fund_name: asset?.fund_name || "",
+    quantity: asset?.quantity?.toString() || "",
+    price: asset ? (asset.current_price / 100).toString() : "",
+    date: asset?.created_at
+      ? asset.created_at.split("T")[0]
+      : new Date().toISOString().split("T")[0],
     notes: asset?.notes || "",
   });
 
-  const [fetchingPrice, setFetchingPrice] = useState(false);
-  const [currency, setCurrency] = useState<"USD" | "ARS">("USD");
-  const [dolarBlue, setDolarBlue] = useState<number | null>(null);
-  const [symbolQuery, setSymbolQuery] = useState("");
-  const [symbolResults, setSymbolResults] = useState<Array<{ symbol: string; name: string; exchange: string }>>([]);
-  const [showSymbolDropdown, setShowSymbolDropdown] = useState(false);
-  const [searchingSymbol, setSearchingSymbol] = useState(false);
+  // FCI fund search
+  const [fundQuery, setFundQuery] = useState(asset?.fund_name || "");
+  const [fundResults, setFundResults] = useState<
+    Array<{ fondo: string; vcp: number; categoria: string }>
+  >([]);
+  const [showFundDropdown, setShowFundDropdown] = useState(false);
+  const [searchingFund, setSearchingFund] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const isEdit = !!asset;
+  const type = form.type;
+  const box = isBoxType(type);
+  const currency = ASSET_CURRENCY[type];
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setShowSymbolDropdown(false);
+        setShowFundDropdown(false);
       }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  function handleSymbolSearch(query: string) {
-    setSymbolQuery(query);
-    setForm((prev) => ({ ...prev, yahoo_symbol: query }));
-
+  function handleFundSearch(query: string) {
+    setFundQuery(query);
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
-
     if (query.length < 2) {
-      setSymbolResults([]);
-      setShowSymbolDropdown(false);
+      setFundResults([]);
+      setShowFundDropdown(false);
       return;
     }
-
     searchTimeout.current = setTimeout(async () => {
-      setSearchingSymbol(true);
+      setSearchingFund(true);
       try {
-        // For CEDEARs, search with .BA suffix and also plain query, then filter to .BA only
-        const searchQuery = form.type === "cedear" ? `${query}.BA` : query;
-        const res = await fetch(`/api/prices/stocks/search?q=${encodeURIComponent(searchQuery)}`);
+        const res = await fetch(`/api/prices/fci/search?q=${encodeURIComponent(query)}`);
         const json = await res.json();
-        let results = json.data || [];
-        if (form.type === "cedear") {
-          // Also search plain query to get more results
-          const res2 = await fetch(`/api/prices/stocks/search?q=${encodeURIComponent(query)}`);
-          const json2 = await res2.json();
-          const extra = (json2.data || []).filter(
-            (r: { symbol: string }) => r.symbol.endsWith(".BA")
-          );
-          // Merge and deduplicate
-          const seen = new Set(results.map((r: { symbol: string }) => r.symbol));
-          for (const r of extra) {
-            if (!seen.has(r.symbol)) {
-              results.push(r);
-              seen.add(r.symbol);
-            }
-          }
-        }
-        setSymbolResults(results);
-        setShowSymbolDropdown(true);
+        setFundResults(json.data || []);
+        setShowFundDropdown(true);
       } finally {
-        setSearchingSymbol(false);
+        setSearchingFund(false);
       }
-    }, 500);
+    }, 400);
   }
 
-  async function selectSymbol(symbol: string, name: string) {
-    // Extract short ticker: "MELI.BA" -> "MELI", "AAPL" -> "AAPL"
-    const shortSymbol = symbol.replace(/\.BA$/, "");
+  function selectFund(fondo: string, vcp: number) {
+    const shortSymbol = fondo.split(" ")[0].slice(0, 8).toUpperCase();
     setForm((prev) => ({
       ...prev,
-      yahoo_symbol: symbol,
-      symbol: shortSymbol,
-      name: name || prev.name,
+      fund_name: fondo,
+      name: fondo,
+      symbol: prev.symbol || shortSymbol,
+      price: vcp.toString(),
     }));
-    setSymbolQuery(symbol);
-    setShowSymbolDropdown(false);
+    setFundQuery(fondo);
+    setShowFundDropdown(false);
+  }
 
-    // Auto-fetch price
+  const fetchHistoricalPrice = useCallback(async (coinId: string, date: string) => {
+    if (!coinId || !date) return;
     setFetchingPrice(true);
     try {
-      const res = await fetch(`/api/prices/stocks/quote?symbol=${encodeURIComponent(symbol)}`);
+      const res = await fetch(`/api/prices/history?coin_id=${coinId}&date=${date}`);
       const json = await res.json();
       if (json.data?.price) {
-        setForm((prev) => ({ ...prev, current_price: json.data.price.toString() }));
-
-        // .BA symbols return ARS prices, force ARS currency
-        if (symbol.endsWith(".BA")) {
-          setCurrency("ARS");
-          // Fetch dolar blue if not already loaded
-          if (!dolarBlue) {
-            try {
-              const dRes = await fetch("/api/prices/dolar");
-              const dJson = await dRes.json();
-              if (dJson.data?.venta) {
-                setDolarBlue(dJson.data.venta);
-              }
-            } catch { /* ignore */ }
-          }
-        }
+        setForm((prev) => ({ ...prev, price: json.data.price.toString() }));
       }
     } finally {
       setFetchingPrice(false);
     }
-  }
-
-  const fetchHistoricalPrice = useCallback(
-    async (coinId: string, date: string) => {
-      if (!coinId || !date) return;
-      setFetchingPrice(true);
-      try {
-        const res = await fetch(
-          `/api/prices/history?coin_id=${coinId}&date=${date}`
-        );
-        const json = await res.json();
-        if (json.data?.price) {
-          setForm((prev) => ({
-            ...prev,
-            current_price: json.data.price.toString(),
-          }));
-        }
-      } finally {
-        setFetchingPrice(false);
-      }
-    },
-    []
-  );
+  }, []);
 
   function handleDateChange(date: string) {
     setForm((prev) => ({ ...prev, date }));
-    if (form.type === "crypto" && form.coingecko_id) {
+    if (type === "crypto" && form.coingecko_id) {
       fetchHistoricalPrice(form.coingecko_id, date);
-    }
-  }
-
-  async function handleCurrencyChange(cur: "USD" | "ARS") {
-    setCurrency(cur);
-    if (cur === "ARS" && !dolarBlue) {
-      try {
-        const res = await fetch("/api/prices/dolar");
-        const json = await res.json();
-        if (json.data?.venta) {
-          setDolarBlue(json.data.venta);
-        }
-      } catch { /* ignore */ }
-    }
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-
-    let priceUsd = parseFloat(form.current_price) || 0;
-    if (currency === "ARS" && dolarBlue && dolarBlue > 0) {
-      priceUsd = priceUsd / dolarBlue;
-    }
-
-    const body = {
-      name: form.name,
-      symbol: form.symbol,
-      type: form.type,
-      coingecko_id: form.type === "crypto" && form.coingecko_id ? form.coingecko_id : null,
-      yahoo_symbol: form.type === "cedear" && form.yahoo_symbol ? form.yahoo_symbol : null,
-      quantity: parseFloat(form.quantity) || 0,
-      current_price: numberToCents(priceUsd),
-      date: form.date,
-      notes: form.notes || null,
-    };
-
-    const url = isEdit ? `/api/assets/${asset.id}` : "/api/assets";
-    const method = isEdit ? "PUT" : "POST";
-
-    try {
-      await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      setOpen(false);
-      onSaved();
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -242,6 +146,79 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
     }));
   }
 
+  function handleTypeChange(v: string) {
+    const t = v as AssetType;
+    setForm((prev) => ({
+      ...prev,
+      type: t,
+      // sensible default name for single-account types
+      name:
+        prev.name ||
+        (t === "managed"
+          ? "BingX Copytrading"
+          : t === "cash_usd"
+            ? "Efectivo USD"
+            : t === "cash_ars"
+              ? "Efectivo ARS"
+              : prev.name),
+      symbol:
+        prev.symbol ||
+        (t === "managed" ? "BINGX" : t === "cash_usd" ? "USD" : t === "cash_ars" ? "ARS" : prev.symbol),
+    }));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      if (isEdit) {
+        // Edit: update name, notes, current price/balance, price source.
+        const body = {
+          name: form.name,
+          symbol: form.symbol,
+          coingecko_id: type === "crypto" && form.coingecko_id ? form.coingecko_id : null,
+          fund_name: type === "fci" && form.fund_name ? form.fund_name : null,
+          current_price: numberToCents(parseFloat(form.price) || 0),
+          notes: form.notes || null,
+        };
+        await fetch(`/api/assets/${asset!.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      } else {
+        const body = {
+          name: form.name,
+          symbol: form.symbol,
+          type,
+          coingecko_id: type === "crypto" && form.coingecko_id ? form.coingecko_id : null,
+          fund_name: type === "fci" && form.fund_name ? form.fund_name : null,
+          quantity: box ? 0 : parseFloat(form.quantity) || 0,
+          price: parseFloat(form.price) || 0,
+          date: form.date,
+          notes: form.notes || null,
+        };
+        await fetch("/api/assets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      }
+      setOpen(false);
+      onSaved();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const priceLabel = box
+    ? isEdit
+      ? `Saldo actual (${currency})`
+      : `Saldo inicial (${currency})`
+    : isEdit
+      ? `Precio actual (${currency})`
+      : `Precio (${currency})`;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       {isEdit ? (
@@ -249,64 +226,102 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
           <Pencil size={16} />
         </DialogTrigger>
       ) : (
-        <DialogTrigger render={<Button />}>
+        <DialogTrigger render={<Button variant="outline" size="sm" />}>
           <Plus size={16} className="mr-2" />
-          Agregar Activo
+          Activo
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md bg-card border border-border">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Editar Activo" : "Nuevo Activo"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {!isEdit && (
+            <div className="space-y-2">
+              <Label>Tipo</Label>
+              <Select value={form.type} onValueChange={(v) => v && handleTypeChange(v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(ASSET_TYPES).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* FCI fund search */}
+          {type === "fci" && !isEdit && (
+            <div className="space-y-2" ref={dropdownRef}>
+              <Label>Buscar fondo (Cocos, etc.)</Label>
+              <div className="relative">
+                <Input
+                  value={fundQuery}
+                  onChange={(e) => handleFundSearch(e.target.value)}
+                  placeholder="Ej: Cocos Pesos Plus"
+                  autoComplete="off"
+                />
+                {searchingFund && (
+                  <Loader2
+                    size={14}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
+                  />
+                )}
+                {showFundDropdown && fundResults.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-popover rounded-lg border border-border shadow-lg max-h-48 overflow-y-auto">
+                    {fundResults.map((r) => (
+                      <button
+                        key={r.fondo}
+                        type="button"
+                        onClick={() => selectFund(r.fondo, r.vcp)}
+                        className="w-full text-left px-3 py-2 hover:bg-accent flex items-center justify-between text-sm"
+                      >
+                        <span className="font-medium">{r.fondo}</span>
+                        <span className="text-xs text-muted-foreground ml-2">
+                          ${r.vcp}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                El precio de la cuotaparte se actualiza solo
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Nombre</Label>
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Bitcoin"
+                placeholder={type === "crypto" ? "Bitcoin" : "Nombre"}
                 required
               />
             </div>
             <div className="space-y-2">
-              <Label>Simbolo</Label>
+              <Label>Símbolo</Label>
               <Input
                 value={form.symbol}
                 onChange={(e) => handleSymbolChange(e.target.value)}
-                placeholder="BTC"
+                placeholder={type === "crypto" ? "BTC" : "—"}
                 required
               />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Tipo</Label>
-            <Select
-              value={form.type}
-              onValueChange={(v) => v && setForm({ ...form, type: v })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(ASSET_TYPES).map(([key, label]) => (
-                  <SelectItem key={key} value={key}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {form.type === "crypto" && (
+          {type === "crypto" && (
             <div className="space-y-2">
               <Label>CoinGecko ID</Label>
               <Input
                 value={form.coingecko_id}
-                onChange={(e) =>
-                  setForm({ ...form, coingecko_id: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, coingecko_id: e.target.value })}
                 placeholder="bitcoin"
               />
               <p className="text-xs text-muted-foreground">
@@ -315,112 +330,35 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
             </div>
           )}
 
-          {form.type === "cedear" && (
-            <div className="space-y-2" ref={dropdownRef}>
-              <Label>Buscar Simbolo</Label>
-              <div className="relative">
-                <Input
-                  value={symbolQuery || form.yahoo_symbol}
-                  onChange={(e) => handleSymbolSearch(e.target.value)}
-                  placeholder="Busca: SPY, MELI, AAPL..."
-                  autoComplete="off"
-                />
-                {searchingSymbol && (
-                  <Loader2
-                    size={14}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
-                  />
-                )}
-                {showSymbolDropdown && symbolResults.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-white rounded-lg border border-border shadow-lg max-h-48 overflow-y-auto">
-                    {symbolResults.map((r) => (
-                      <button
-                        key={r.symbol}
-                        type="button"
-                        onClick={() => selectSymbol(r.symbol, r.name)}
-                        className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center justify-between text-sm"
-                      >
-                        <div>
-                          <span className="font-medium">{r.symbol}</span>
-                          <span className="text-muted-foreground ml-2 text-xs">
-                            {r.name}
-                          </span>
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          {r.exchange}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Escribi el nombre o ticker y selecciona de la lista
-              </p>
-            </div>
+          {type === "managed" && !isEdit && (
+            <p className="text-xs text-muted-foreground bg-muted rounded-md p-2">
+              Cargá el saldo actual de tu cuenta. Después podés conectar la API de
+              BingX en Ajustes para que se actualice solo.
+            </p>
           )}
 
-          <div className="flex gap-2 items-center">
-            <Label className="text-sm">Moneda:</Label>
-            {form.yahoo_symbol?.endsWith(".BA") ? (
-              <div className="flex rounded-lg border border-border overflow-hidden">
-                <span className="px-3 py-1 text-xs font-medium bg-emerald-500 text-white">
-                  ARS
-                </span>
-              </div>
-            ) : (
-              <div className="flex rounded-lg border border-border overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => handleCurrencyChange("USD")}
-                  className={`px-3 py-1 text-xs font-medium transition-colors ${
-                    currency === "USD"
-                      ? "bg-emerald-500 text-white"
-                      : "bg-transparent text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  USD
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleCurrencyChange("ARS")}
-                  className={`px-3 py-1 text-xs font-medium transition-colors ${
-                    currency === "ARS"
-                      ? "bg-emerald-500 text-white"
-                      : "bg-transparent text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  ARS
-                </button>
+          {/* Amounts */}
+          <div className={box ? "grid grid-cols-2 gap-4" : "grid grid-cols-3 gap-4"}>
+            {!box && (
+              <div className="space-y-2">
+                <Label>Cantidad</Label>
+                <Input
+                  type="number"
+                  step="any"
+                  value={form.quantity}
+                  onChange={(e) => setForm({ ...form, quantity: e.target.value })}
+                  placeholder="0.05"
+                />
               </div>
             )}
-            {currency === "ARS" && dolarBlue && (
-              <span className="text-xs text-muted-foreground">
-                Dolar blue: ${dolarBlue.toLocaleString()}
-              </span>
-            )}
-          </div>
-
-          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label>Cantidad</Label>
-              <Input
-                type="number"
-                step="any"
-                value={form.quantity}
-                onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Precio ({currency})</Label>
+              <Label>{priceLabel}</Label>
               <div className="relative">
                 <Input
                   type="number"
                   step="any"
-                  value={form.current_price}
-                  onChange={(e) =>
-                    setForm({ ...form, current_price: e.target.value })
-                  }
+                  value={form.price}
+                  onChange={(e) => setForm({ ...form, price: e.target.value })}
                   className={fetchingPrice ? "pr-8" : ""}
                 />
                 {fetchingPrice && (
@@ -431,20 +369,22 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
                 )}
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Fecha</Label>
-              <Input
-                type="date"
-                value={form.date}
-                onChange={(e) => handleDateChange(e.target.value)}
-                required
-              />
-            </div>
+            {!isEdit && (
+              <div className="space-y-2">
+                <Label>Fecha</Label>
+                <Input
+                  type="date"
+                  value={form.date}
+                  onChange={(e) => handleDateChange(e.target.value)}
+                  required
+                />
+              </div>
+            )}
           </div>
 
-          {form.type === "crypto" && form.coingecko_id && (
+          {type === "crypto" && form.coingecko_id && !isEdit && (
             <p className="text-xs text-muted-foreground">
-              Al cambiar la fecha se busca el precio historico automaticamente desde CoinGecko
+              Al cambiar la fecha se busca el precio histórico desde CoinGecko
             </p>
           )}
 
@@ -459,11 +399,7 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
           </div>
 
           <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setOpen(false)}
-            >
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
             <Button type="submit" disabled={loading}>

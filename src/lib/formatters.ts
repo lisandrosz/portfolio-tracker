@@ -11,6 +11,18 @@ export function centsToNumber(cents: number): number {
   return cents / 100;
 }
 
+/** Format cents in a given native currency (USD or ARS). */
+export function formatMoney(cents: number, currency: "USD" | "ARS" = "USD"): string {
+  if (currency === "ARS") {
+    return new Intl.NumberFormat("es-AR", {
+      style: "currency",
+      currency: "ARS",
+      maximumFractionDigits: 0,
+    }).format(cents / 100);
+  }
+  return centsToUsd(cents);
+}
+
 export function numberToCents(value: number): number {
   return Math.round(value * 100);
 }

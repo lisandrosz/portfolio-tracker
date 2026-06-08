@@ -1,51 +1,24 @@
 import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
 import { autoSnapshot } from "@/lib/snapshot";
+import { getBlueForDate } from "@/lib/dolar-api";
+import { recalcUnitAsset, applyBoxFlow } from "@/lib/portfolio";
+import { numberToCents } from "@/lib/formatters";
+import { isBoxType } from "@/lib/constants";
+import type { Asset } from "@/types";
 import { z } from "zod";
 
+// All monetary fields are plain decimals in the asset's native currency.
 const createTransactionSchema = z.object({
   asset_id: z.number(),
-  type: z.enum(["buy", "sell", "deposit", "withdrawal", "interest", "dividend"]),
-  quantity: z.number(),
-  price: z.number(), // cents
-  total: z.number().optional(), // cents, used for interest/dividend
+  type: z.enum(["buy", "sell", "deposit", "withdrawal"]),
+  quantity: z.number().optional(), // units, for buy/sell
+  price: z.number().optional(), // native per unit, for buy/sell
+  amount: z.number().optional(), // native total, for deposit/withdrawal
   fee: z.number().default(0),
   date: z.string(),
   notes: z.string().nullable().optional(),
 });
-
-function recalculateAsset(db: ReturnType<typeof getDb>, assetId: number) {
-  const txns = db
-    .prepare("SELECT * FROM transactions WHERE asset_id = ?")
-    .all(assetId) as Array<{
-    type: string;
-    quantity: number;
-    price: number;
-    total: number;
-    fee: number;
-  }>;
-
-  let totalQty = 0;
-  let totalCost = 0;
-
-  for (const tx of txns) {
-    // Interest/dividend don't affect quantity (they have qty=0)
-    totalQty += tx.quantity;
-    if (["buy", "deposit"].includes(tx.type) && tx.quantity > 0) {
-      totalCost += Math.abs(tx.total) + (tx.fee || 0);
-    }
-  }
-
-  const buyQty = txns
-    .filter((t) => ["buy", "deposit"].includes(t.type) && t.quantity > 0)
-    .reduce((sum, t) => sum + t.quantity, 0);
-
-  const avgCost = buyQty > 0 ? Math.round(totalCost / buyQty) : 0;
-
-  db.prepare(
-    "UPDATE assets SET quantity = ?, avg_cost = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(Math.max(0, totalQty), avgCost, assetId);
-}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -53,7 +26,7 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get("type");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
-  const limit = searchParams.get("limit") || "50";
+  const limit = searchParams.get("limit") || "100";
 
   const db = getDb();
   let query =
@@ -90,48 +63,89 @@ export async function POST(request: NextRequest) {
     const data = createTransactionSchema.parse(body);
 
     const db = getDb();
-
-    // Check asset exists
-    const asset = db.prepare("SELECT * FROM assets WHERE id = ?").get(data.asset_id);
+    const asset = db
+      .prepare("SELECT * FROM assets WHERE id = ?")
+      .get(data.asset_id) as Asset | undefined;
     if (!asset) return Response.json({ error: "Asset not found" }, { status: 404 });
 
-    // For interest/dividend: quantity=0, total=provided amount
-    // For sell/withdrawal: quantity is negative
-    const isIncomeType = ["interest", "dividend"].includes(data.type);
-    const qty = isIncomeType
-      ? 0
-      : ["sell", "withdrawal"].includes(data.type)
-        ? -Math.abs(data.quantity)
-        : Math.abs(data.quantity);
-    const total = isIncomeType && data.total
-      ? data.total
-      : Math.round(Math.abs(qty) * data.price);
+    const box = isBoxType(asset.type);
+    const feeCents = numberToCents(data.fee || 0);
+
+    let qty = 0;
+    let priceCents = 0;
+    let totalNative = 0;
+
+    if (box) {
+      // deposit / withdrawal: a single amount moves in or out of the balance.
+      if (data.amount == null || data.amount <= 0) {
+        return Response.json({ error: "Falta el monto" }, { status: 400 });
+      }
+      totalNative = numberToCents(data.amount);
+    } else {
+      // buy / sell: quantity x price.
+      if (data.quantity == null || data.quantity <= 0 || data.price == null) {
+        return Response.json({ error: "Falta cantidad o precio" }, { status: 400 });
+      }
+      const absQty = Math.abs(data.quantity);
+      priceCents = numberToCents(data.price);
+      const base = Math.round(absQty * priceCents);
+
+      if (data.type === "sell") {
+        if (absQty > asset.quantity + 1e-9) {
+          return Response.json(
+            { error: "No podés vender más de lo que tenés" },
+            { status: 400 }
+          );
+        }
+        qty = -absQty;
+        totalNative = base - feeCents;
+      } else {
+        qty = absQty;
+        totalNative = base + feeCents;
+      }
+    }
+
+    // Freeze the USD value at the transaction date.
+    const blue = asset.currency === "ARS" ? await getBlueForDate(data.date) : null;
+    const totalUsd =
+      asset.currency === "ARS"
+        ? blue && blue > 0
+          ? Math.round(totalNative / blue)
+          : 0
+        : totalNative;
 
     const result = db
       .prepare(
-        `INSERT INTO transactions (asset_id, type, quantity, price, total, fee, date, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, currency, fee, date, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         data.asset_id,
         data.type,
         qty,
-        data.price,
-        total,
-        data.fee,
+        priceCents,
+        totalNative,
+        totalUsd,
+        asset.currency,
+        feeCents,
         data.date,
         data.notes ?? null
       );
 
-    recalculateAsset(db, data.asset_id);
+    if (box) {
+      const delta = data.type === "deposit" ? totalNative : -totalNative;
+      applyBoxFlow(db, data.asset_id, delta);
+    } else {
+      recalcUnitAsset(db, data.asset_id);
+    }
+
+    await autoSnapshot(blue);
 
     const transaction = db
       .prepare(
         "SELECT t.*, a.name as asset_name, a.symbol as asset_symbol FROM transactions t JOIN assets a ON t.asset_id = a.id WHERE t.id = ?"
       )
       .get(result.lastInsertRowid);
-
-    autoSnapshot();
 
     return Response.json({ data: transaction }, { status: 201 });
   } catch (err) {
