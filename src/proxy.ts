@@ -16,8 +16,12 @@ export async function proxy(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const authed = await verifySessionToken(secret, token);
 
-  // Always allow the login page and the auth endpoints.
-  const isAuthPath = pathname === "/login" || pathname.startsWith("/api/auth/");
+  // Always allow the login page, the auth endpoints, and the cron endpoint
+  // (the cron route guards itself with CRON_SECRET).
+  const isAuthPath =
+    pathname === "/login" ||
+    pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/api/cron/");
 
   if (authed) {
     if (pathname === "/login") return NextResponse.redirect(new URL("/", req.url));
