@@ -1,7 +1,7 @@
-import type Database from "better-sqlite3";
+import type { Db } from "./db";
 import { INFLOW_TYPES, OUTFLOW_TYPES } from "./constants";
 
-type DB = Database.Database;
+type DB = Db;
 
 /**
  * Convert an amount in an asset's native currency (cents) to USD cents.
@@ -58,10 +58,10 @@ export function grossInvestedUsd(txns: TxRow[]): number {
  * transactions. Quantity is stored signed in transactions (sells are negative).
  * Box assets keep quantity = 1 and are not touched here.
  */
-export function recalcUnitAsset(db: DB, assetId: number) {
-  const txns = db
+export async function recalcUnitAsset(db: DB, assetId: number) {
+  const txns = (await db
     .prepare("SELECT type, quantity, total, total_usd FROM transactions WHERE asset_id = ?")
-    .all(assetId) as TxRow[];
+    .all(assetId)) as TxRow[];
 
   let qty = 0;
   let buyQty = 0;
@@ -77,17 +77,21 @@ export function recalcUnitAsset(db: DB, assetId: number) {
 
   const avgCost = buyQty > 0 ? Math.round(buyCostUsd / buyQty) : 0;
 
-  db.prepare(
-    "UPDATE assets SET quantity = ?, avg_cost = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(Math.max(0, qty), avgCost, assetId);
+  await db
+    .prepare(
+      "UPDATE assets SET quantity = ?, avg_cost = ?, updated_at = datetime('now') WHERE id = ?"
+    )
+    .run(Math.max(0, qty), avgCost, assetId);
 }
 
 /**
  * Apply a deposit/withdrawal to a BOX asset's balance (current_price), in the
  * asset's native cents. `delta` is positive for inflow, negative for outflow.
  */
-export function applyBoxFlow(db: DB, assetId: number, deltaNative: number) {
-  db.prepare(
-    "UPDATE assets SET current_price = MAX(0, current_price + ?), price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  ).run(deltaNative, assetId);
+export async function applyBoxFlow(db: DB, assetId: number, deltaNative: number) {
+  await db
+    .prepare(
+      "UPDATE assets SET current_price = MAX(0, current_price + ?), price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+    )
+    .run(deltaNative, assetId);
 }

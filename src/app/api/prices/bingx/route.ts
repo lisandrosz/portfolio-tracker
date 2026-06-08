@@ -1,11 +1,11 @@
-import getDb from "@/lib/db";
+import getDb, { type Db } from "@/lib/db";
 import { fetchBingxEquity } from "@/lib/bingx";
 import { autoSnapshot } from "@/lib/snapshot";
 import { numberToCents } from "@/lib/formatters";
 import type { Asset } from "@/types";
 
-function getSetting(db: ReturnType<typeof getDb>, key: string): string | null {
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+async function getSetting(db: Db, key: string): Promise<string | null> {
+  const row = (await db.prepare("SELECT value FROM settings WHERE key = ?").get(key)) as
     | { value: string }
     | undefined;
   return row?.value ?? null;
@@ -13,9 +13,9 @@ function getSetting(db: ReturnType<typeof getDb>, key: string): string | null {
 
 // Sync BingX futures equity into all "managed" assets (copytrading balance).
 export async function POST() {
-  const db = getDb();
-  const apiKey = getSetting(db, "bingx_api_key");
-  const apiSecret = getSetting(db, "bingx_api_secret");
+  const db = await getDb();
+  const apiKey = await getSetting(db, "bingx_api_key");
+  const apiSecret = await getSetting(db, "bingx_api_secret");
 
   if (!apiKey || !apiSecret) {
     return Response.json(
@@ -24,9 +24,9 @@ export async function POST() {
     );
   }
 
-  const managed = db
+  const managed = (await db
     .prepare("SELECT * FROM assets WHERE type = 'managed'")
-    .all() as Asset[];
+    .all()) as Asset[];
   if (managed.length === 0) {
     return Response.json({ error: "No hay cuenta administrada para sincronizar" }, { status: 400 });
   }
@@ -52,10 +52,9 @@ export async function POST() {
     });
   }
 
-  const stmt = db.prepare(
-    "UPDATE assets SET current_price = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
-  );
-  for (const a of managed) stmt.run(cents, a.id);
+  const updateSql =
+    "UPDATE assets SET current_price = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?";
+  await db.batch(managed.map((a) => ({ sql: updateSql, args: [cents, a.id] })));
 
   await autoSnapshot();
 

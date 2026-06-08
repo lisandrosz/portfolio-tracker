@@ -28,10 +28,10 @@ export async function GET(request: NextRequest) {
   const to = searchParams.get("to");
   const limit = searchParams.get("limit") || "100";
 
-  const db = getDb();
+  const db = await getDb();
   let query =
     "SELECT t.*, a.name as asset_name, a.symbol as asset_symbol FROM transactions t JOIN assets a ON t.asset_id = a.id WHERE 1=1";
-  const params: unknown[] = [];
+  const params: (string | number)[] = [];
 
   if (assetId) {
     query += " AND t.asset_id = ?";
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
   query += " ORDER BY t.date DESC, t.created_at DESC LIMIT ?";
   params.push(parseInt(limit));
 
-  const transactions = db.prepare(query).all(...params);
+  const transactions = await db.prepare(query).all(...params);
   return Response.json({ data: transactions });
 }
 
@@ -62,10 +62,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const data = createTransactionSchema.parse(body);
 
-    const db = getDb();
-    const asset = db
+    const db = await getDb();
+    const asset = (await db
       .prepare("SELECT * FROM assets WHERE id = ?")
-      .get(data.asset_id) as Asset | undefined;
+      .get(data.asset_id)) as Asset | undefined;
     if (!asset) return Response.json({ error: "Asset not found" }, { status: 404 });
 
     const box = isBoxType(asset.type);
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
           : 0
         : totalNative;
 
-    const result = db
+    const result = await db
       .prepare(
         `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, currency, fee, date, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -134,14 +134,14 @@ export async function POST(request: NextRequest) {
 
     if (box) {
       const delta = data.type === "deposit" ? totalNative : -totalNative;
-      applyBoxFlow(db, data.asset_id, delta);
+      await applyBoxFlow(db, data.asset_id, delta);
     } else {
-      recalcUnitAsset(db, data.asset_id);
+      await recalcUnitAsset(db, data.asset_id);
     }
 
     await autoSnapshot(blue);
 
-    const transaction = db
+    const transaction = await db
       .prepare(
         "SELECT t.*, a.name as asset_name, a.symbol as asset_symbol FROM transactions t JOIN assets a ON t.asset_id = a.id WHERE t.id = ?"
       )

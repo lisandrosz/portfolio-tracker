@@ -21,8 +21,8 @@ const createAssetSchema = z.object({
 });
 
 export async function GET() {
-  const db = getDb();
-  const assets = db.prepare("SELECT * FROM assets ORDER BY type, name").all();
+  const db = await getDb();
+  const assets = await db.prepare("SELECT * FROM assets ORDER BY type, name").all();
   return Response.json({ data: assets });
 }
 
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const data = createAssetSchema.parse(body);
 
-    const db = getDb();
+    const db = await getDb();
     const symbol = data.symbol.toUpperCase();
     const type = data.type as AssetType;
     const currency = ASSET_CURRENCY[type];
@@ -39,21 +39,23 @@ export async function POST(request: NextRequest) {
     const priceCents = numberToCents(data.price || 0);
     const date = data.date || new Date().toISOString().split("T")[0];
 
-    const existing = db
+    const existing = (await db
       .prepare("SELECT * FROM assets WHERE symbol = ? AND type = ?")
-      .get(symbol, type) as Asset | undefined;
+      .get(symbol, type)) as Asset | undefined;
 
     let assetId: number;
     if (existing) {
       assetId = existing.id;
       // For unit assets keep the latest market price up to date.
       if (!box && priceCents > 0) {
-        db.prepare(
-          "UPDATE assets SET current_price = ?, updated_at = datetime('now') WHERE id = ?"
-        ).run(priceCents, assetId);
+        await db
+          .prepare(
+            "UPDATE assets SET current_price = ?, updated_at = datetime('now') WHERE id = ?"
+          )
+          .run(priceCents, assetId);
       }
     } else {
-      const result = db
+      const result = await db
         .prepare(
           `INSERT INTO assets (name, symbol, type, coingecko_id, fund_name, currency, quantity, current_price, notes, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -81,32 +83,36 @@ export async function POST(request: NextRequest) {
     if (box && data.price > 0) {
       // Opening contribution (deposit).
       const totalNative = priceCents;
-      db.prepare(
-        `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, currency, fee, date, notes)
+      await db
+        .prepare(
+          `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, currency, fee, date, notes)
          VALUES (?, 'deposit', 0, 0, ?, ?, ?, 0, ?, ?)`
-      ).run(assetId, totalNative, toUsd(totalNative), currency, date, data.notes || "Saldo inicial");
+        )
+        .run(assetId, totalNative, toUsd(totalNative), currency, date, data.notes || "Saldo inicial");
       // New asset already has the balance set; existing one must be bumped.
-      if (existing) applyBoxFlow(db, assetId, totalNative);
+      if (existing) await applyBoxFlow(db, assetId, totalNative);
     } else if (!box && data.quantity > 0 && data.price > 0) {
       // Opening buy.
       const totalNative = Math.round(data.quantity * priceCents);
-      db.prepare(
-        `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, currency, fee, date, notes)
+      await db
+        .prepare(
+          `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, currency, fee, date, notes)
          VALUES (?, 'buy', ?, ?, ?, ?, ?, 0, ?, ?)`
-      ).run(
-        assetId,
-        data.quantity,
-        priceCents,
-        totalNative,
-        toUsd(totalNative),
-        currency,
-        date,
-        data.notes || "Compra inicial"
-      );
-      recalcUnitAsset(db, assetId);
+        )
+        .run(
+          assetId,
+          data.quantity,
+          priceCents,
+          totalNative,
+          toUsd(totalNative),
+          currency,
+          date,
+          data.notes || "Compra inicial"
+        );
+      await recalcUnitAsset(db, assetId);
     }
 
-    const asset = db.prepare("SELECT * FROM assets WHERE id = ?").get(assetId);
+    const asset = await db.prepare("SELECT * FROM assets WHERE id = ?").get(assetId);
     await autoSnapshot(blue);
 
     return Response.json({ data: asset }, { status: 201 });

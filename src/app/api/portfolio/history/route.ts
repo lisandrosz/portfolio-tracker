@@ -9,11 +9,11 @@ export async function GET(request: NextRequest) {
   const period = (request.nextUrl.searchParams.get("period") || "ALL") as Period;
   const days = PERIODS[period] || 9999;
 
-  const db = getDb();
+  const db = await getDb();
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 
-  const snapshots = db
+  const snapshots = await db
     .prepare(
       "SELECT * FROM portfolio_snapshots WHERE date >= ? ORDER BY date ASC"
     )

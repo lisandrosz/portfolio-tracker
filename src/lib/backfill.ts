@@ -1,4 +1,4 @@
-import getDb from "./db";
+import getDb, { type SqlArg } from "./db";
 import { fetchDailyPrices } from "./coingecko";
 import { autoSnapshot } from "./snapshot";
 import { INFLOW_TYPES, OUTFLOW_TYPES } from "./constants";
@@ -37,15 +37,15 @@ function enumerateDates(from: string, to: string): string[] {
  *   (no historical market value available; "today" gets live values via autoSnapshot).
  */
 export async function rebuildHistory(): Promise<{ days: number }> {
-  const db = getDb();
-  const assets = db.prepare("SELECT * FROM assets").all() as Asset[];
-  const txns = db
+  const db = await getDb();
+  const assets = (await db.prepare("SELECT * FROM assets").all()) as Asset[];
+  const txns = (await db
     .prepare("SELECT asset_id, type, quantity, total_usd, date FROM transactions ORDER BY date ASC")
-    .all() as Tx[];
+    .all()) as Tx[];
 
   // No transactions left -> clear the whole history (chart goes empty).
   if (txns.length === 0) {
-    db.prepare("DELETE FROM portfolio_snapshots").run();
+    await db.prepare("DELETE FROM portfolio_snapshots").run();
     return { days: 0 };
   }
 
@@ -76,53 +76,56 @@ export async function rebuildHistory(): Promise<{ days: number }> {
     }
   }
 
-  const upsert = db.prepare(
-    `INSERT INTO portfolio_snapshots (total_value, total_cost, date, breakdown)
+  const upsertSql = `INSERT INTO portfolio_snapshots (total_value, total_cost, date, breakdown)
      VALUES (?, ?, ?, ?)
-     ON CONFLICT(date) DO UPDATE SET total_value = ?, total_cost = ?, breakdown = ?`
-  );
+     ON CONFLICT(date) DO UPDATE SET total_value = ?, total_cost = ?, breakdown = ?`;
 
-  const run = db.transaction(() => {
-    // Authoritative rebuild: drop stale rows (e.g. dates before the new
-    // earliest transaction) and recompute the full range from scratch.
-    db.prepare("DELETE FROM portfolio_snapshots").run();
-    for (const D of dates) {
-      let totalValue = 0;
-      let totalCost = 0;
-      const breakdown: Record<string, number> = {};
+  // Authoritative rebuild: drop stale rows (e.g. dates before the new earliest
+  // transaction) and recompute the full range from scratch, atomically in one batch.
+  const stmts: { sql: string; args: SqlArg[] }[] = [
+    { sql: "DELETE FROM portfolio_snapshots", args: [] },
+  ];
 
-      for (const a of assets) {
-        const ats = txByAsset.get(a.id) ?? [];
-        let invested = 0;
-        let qty = 0;
-        for (const t of ats) {
-          if (t.date <= D) {
-            if ((INFLOW_TYPES as string[]).includes(t.type)) invested += t.total_usd;
-            else if ((OUTFLOW_TYPES as string[]).includes(t.type)) invested -= t.total_usd;
-            qty += t.quantity;
-          }
+  for (const D of dates) {
+    let totalValue = 0;
+    let totalCost = 0;
+    const breakdown: Record<string, number> = {};
+
+    for (const a of assets) {
+      const ats = txByAsset.get(a.id) ?? [];
+      let invested = 0;
+      let qty = 0;
+      for (const t of ats) {
+        if (t.date <= D) {
+          if ((INFLOW_TYPES as string[]).includes(t.type)) invested += t.total_usd;
+          else if ((OUTFLOW_TYPES as string[]).includes(t.type)) invested -= t.total_usd;
+          qty += t.quantity;
         }
-
-        let valueUsd: number;
-        if (a.type === "crypto") {
-          const price = cryptoPrices.get(a.id)?.get(D);
-          valueUsd = price != null ? Math.round(qty * price * 100) : invested;
-        } else {
-          // FCI / box: no historical market value -> track contributed capital.
-          valueUsd = invested;
-        }
-        if (valueUsd < 0) valueUsd = 0;
-
-        totalValue += valueUsd;
-        totalCost += invested;
-        if (valueUsd > 0) breakdown[a.type] = (breakdown[a.type] || 0) + valueUsd;
       }
 
-      const json = JSON.stringify(breakdown);
-      upsert.run(totalValue, totalCost, D, json, totalValue, totalCost, json);
+      let valueUsd: number;
+      if (a.type === "crypto") {
+        const price = cryptoPrices.get(a.id)?.get(D);
+        valueUsd = price != null ? Math.round(qty * price * 100) : invested;
+      } else {
+        // FCI / box: no historical market value -> track contributed capital.
+        valueUsd = invested;
+      }
+      if (valueUsd < 0) valueUsd = 0;
+
+      totalValue += valueUsd;
+      totalCost += invested;
+      if (valueUsd > 0) breakdown[a.type] = (breakdown[a.type] || 0) + valueUsd;
     }
-  });
-  run();
+
+    const json = JSON.stringify(breakdown);
+    stmts.push({
+      sql: upsertSql,
+      args: [totalValue, totalCost, D, json, totalValue, totalCost, json],
+    });
+  }
+
+  await db.batch(stmts);
 
   // Overwrite today's row with live values (real box balances + current prices).
   await autoSnapshot();

@@ -10,25 +10,25 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const db = getDb();
+  const db = await getDb();
 
-  const tx = db.prepare("SELECT * FROM transactions WHERE id = ?").get(id) as
+  const tx = (await db.prepare("SELECT * FROM transactions WHERE id = ?").get(id)) as
     | { asset_id: number; type: string; total: number }
     | undefined;
   if (!tx) return Response.json({ error: "Not found" }, { status: 404 });
 
-  const asset = db.prepare("SELECT * FROM assets WHERE id = ?").get(tx.asset_id) as
-    | Asset
-    | undefined;
+  const asset = (await db
+    .prepare("SELECT * FROM assets WHERE id = ?")
+    .get(tx.asset_id)) as Asset | undefined;
 
-  db.prepare("DELETE FROM transactions WHERE id = ?").run(id);
+  await db.prepare("DELETE FROM transactions WHERE id = ?").run(id);
 
   if (asset && isBoxType(asset.type)) {
     // Reverse the deposit/withdrawal effect on the balance.
     const delta = tx.type === "deposit" ? -tx.total : tx.total;
-    applyBoxFlow(db, tx.asset_id, delta);
+    await applyBoxFlow(db, tx.asset_id, delta);
   } else {
-    recalcUnitAsset(db, tx.asset_id);
+    await recalcUnitAsset(db, tx.asset_id);
   }
 
   await autoSnapshot();

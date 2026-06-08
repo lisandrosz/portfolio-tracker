@@ -3,11 +3,11 @@ import { autoSnapshot } from "@/lib/snapshot";
 
 // Auto-snapshot: creates one for this month if it doesn't exist
 export async function GET() {
-  const db = getDb();
+  const db = await getDb();
   const now = new Date();
   const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  const existing = db
+  const existing = await db
     .prepare("SELECT * FROM portfolio_snapshots WHERE date LIKE ?")
     .get(`${monthKey}%`);
 
@@ -15,10 +15,10 @@ export async function GET() {
     return Response.json({ data: { created: false, snapshot: existing } });
   }
 
-  autoSnapshot();
+  await autoSnapshot();
 
   const today = now.toISOString().split("T")[0];
-  const snapshot = db
+  const snapshot = await db
     .prepare("SELECT * FROM portfolio_snapshots WHERE date = ?")
     .get(today);
 
@@ -26,11 +26,11 @@ export async function GET() {
 }
 
 export async function POST() {
-  autoSnapshot();
+  await autoSnapshot();
 
-  const db = getDb();
+  const db = await getDb();
   const today = new Date().toISOString().split("T")[0];
-  const snapshot = db
+  const snapshot = await db
     .prepare("SELECT * FROM portfolio_snapshots WHERE date = ?")
     .get(today);
 

@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckCircle2, Link2, Loader2, RefreshCw, History } from "lucide-react";
+import { CheckCircle2, Link2, Loader2, RefreshCw, History, LogOut } from "lucide-react";
 
 interface BingxStatus {
   configured: boolean;
@@ -30,6 +30,7 @@ export function SettingsModal({ open, onOpenChange, onChanged }: Props) {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [authEnabled, setAuthEnabled] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   async function loadStatus() {
@@ -38,12 +39,28 @@ export function SettingsModal({ open, onOpenChange, onChanged }: Props) {
     setStatus(json.data);
   }
 
+  async function loadAuth() {
+    try {
+      const res = await fetch("/api/auth/login");
+      const json = await res.json();
+      setAuthEnabled(!!json.enabled);
+    } catch {
+      setAuthEnabled(false);
+    }
+  }
+
   useEffect(() => {
     if (open) {
       setMessage(null);
       loadStatus();
+      loadAuth();
     }
   }, [open]);
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.href = "/login";
+  }
 
   async function save() {
     setSaving(true);
@@ -180,6 +197,15 @@ export function SettingsModal({ open, onOpenChange, onChanged }: Props) {
             <p className={message.type === "ok" ? "text-sm text-emerald-400" : "text-sm text-red-400"}>
               {message.text}
             </p>
+          )}
+
+          {authEnabled && (
+            <div className="border-t border-border pt-4">
+              <Button size="sm" variant="ghost" onClick={logout} className="text-muted-foreground">
+                <LogOut size={14} className="mr-2" />
+                Cerrar sesión
+              </Button>
+            </div>
           )}
         </div>
       </DialogContent>

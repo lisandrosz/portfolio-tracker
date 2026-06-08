@@ -29,17 +29,19 @@ export async function fetchDolarBlue(): Promise<DolarPrice | null> {
  * if the API is temporarily down.
  */
 export async function getCurrentBlue(): Promise<number | null> {
-  const db = getDb();
+  const db = await getDb();
   const price = await fetchDolarBlue();
   if (price?.venta) {
-    db.prepare(
-      "INSERT INTO settings (key, value) VALUES ('dolar_blue', ?) ON CONFLICT(key) DO UPDATE SET value = ?"
-    ).run(String(price.venta), String(price.venta));
+    await db
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('dolar_blue', ?) ON CONFLICT(key) DO UPDATE SET value = ?"
+      )
+      .run(String(price.venta), String(price.venta));
     return price.venta;
   }
-  const cached = db.prepare("SELECT value FROM settings WHERE key = 'dolar_blue'").get() as
-    | { value: string }
-    | undefined;
+  const cached = (await db
+    .prepare("SELECT value FROM settings WHERE key = 'dolar_blue'")
+    .get()) as { value: string } | undefined;
   return cached ? Number(cached.value) : null;
 }
 

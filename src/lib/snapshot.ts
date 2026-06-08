@@ -8,13 +8,13 @@ import type { Asset } from "@/types";
  * total_value = sum of holdings in USD; total_cost = net invested capital.
  */
 export async function autoSnapshot(blueArg?: number | null) {
-  const db = getDb();
+  const db = await getDb();
   const blue = blueArg ?? (await getCurrentBlue());
-  const assets = db.prepare("SELECT * FROM assets").all() as Asset[];
+  const assets = (await db.prepare("SELECT * FROM assets").all()) as Asset[];
 
-  const txns = db
+  const txns = (await db
     .prepare("SELECT asset_id, type, quantity, total, total_usd FROM transactions")
-    .all() as Array<{
+    .all()) as Array<{
     asset_id: number;
     type: string;
     quantity: number;
@@ -44,17 +44,19 @@ export async function autoSnapshot(blueArg?: number | null) {
 
   const today = new Date().toISOString().split("T")[0];
 
-  db.prepare(
-    `INSERT INTO portfolio_snapshots (total_value, total_cost, date, breakdown)
+  await db
+    .prepare(
+      `INSERT INTO portfolio_snapshots (total_value, total_cost, date, breakdown)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(date) DO UPDATE SET total_value = ?, total_cost = ?, breakdown = ?`
-  ).run(
-    totalValue,
-    totalCost,
-    today,
-    JSON.stringify(breakdown),
-    totalValue,
-    totalCost,
-    JSON.stringify(breakdown)
-  );
+    )
+    .run(
+      totalValue,
+      totalCost,
+      today,
+      JSON.stringify(breakdown),
+      totalValue,
+      totalCost,
+      JSON.stringify(breakdown)
+    );
 }

@@ -7,15 +7,15 @@ import type { Asset } from "@/types";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const db = getDb();
+  const db = await getDb();
   const blue = await getCurrentBlue();
 
-  const assets = db.prepare("SELECT * FROM assets").all() as Asset[];
+  const assets = (await db.prepare("SELECT * FROM assets").all()) as Asset[];
 
   // Net invested capital per asset (USD cents), from all transactions.
-  const txns = db
+  const txns = (await db
     .prepare("SELECT asset_id, type, quantity, total, total_usd FROM transactions")
-    .all() as Array<{
+    .all()) as Array<{
     asset_id: number;
     type: string;
     quantity: number;

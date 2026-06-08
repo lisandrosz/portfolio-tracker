@@ -18,11 +18,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const db = getDb();
-  const asset = db.prepare("SELECT * FROM assets WHERE id = ?").get(id);
+  const db = await getDb();
+  const asset = await db.prepare("SELECT * FROM assets WHERE id = ?").get(id);
   if (!asset) return Response.json({ error: "Not found" }, { status: 404 });
 
-  const transactions = db
+  const transactions = await db
     .prepare("SELECT * FROM transactions WHERE asset_id = ? ORDER BY date DESC")
     .all(id);
 
@@ -38,12 +38,12 @@ export async function PUT(
     const body = await request.json();
     const data = updateAssetSchema.parse(body);
 
-    const db = getDb();
-    const existing = db.prepare("SELECT * FROM assets WHERE id = ?").get(id);
+    const db = await getDb();
+    const existing = await db.prepare("SELECT * FROM assets WHERE id = ?").get(id);
     if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
 
     const fields: string[] = [];
-    const values: unknown[] = [];
+    const values: (string | number | null)[] = [];
 
     for (const [key, value] of Object.entries(data)) {
       if (value !== undefined) {
@@ -59,10 +59,10 @@ export async function PUT(
     if (fields.length > 0) {
       fields.push("updated_at = datetime('now')");
       values.push(id);
-      db.prepare(`UPDATE assets SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+      await db.prepare(`UPDATE assets SET ${fields.join(", ")} WHERE id = ?`).run(...values);
     }
 
-    const updated = db.prepare("SELECT * FROM assets WHERE id = ?").get(id);
+    const updated = await db.prepare("SELECT * FROM assets WHERE id = ?").get(id);
     await autoSnapshot();
     return Response.json({ data: updated });
   } catch (err) {
@@ -78,10 +78,17 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const db = getDb();
-  const result = db.prepare("DELETE FROM assets WHERE id = ?").run(id);
-  if (result.changes === 0)
-    return Response.json({ error: "Not found" }, { status: 404 });
+  const db = await getDb();
+  const existing = await db.prepare("SELECT id FROM assets WHERE id = ?").get(id);
+  if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
+
+  // Delete children explicitly (don't rely on FK cascade persisting across
+  // libSQL/Turso connections), then the asset — atomically.
+  await db.batch([
+    { sql: "DELETE FROM transactions WHERE asset_id = ?", args: [id] },
+    { sql: "DELETE FROM price_history WHERE asset_id = ?", args: [id] },
+    { sql: "DELETE FROM assets WHERE id = ?", args: [id] },
+  ]);
   await autoSnapshot();
   return Response.json({ data: { deleted: true } });
 }
