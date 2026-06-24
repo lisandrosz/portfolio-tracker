@@ -43,7 +43,7 @@ export function MovementsModal({ open, onOpenChange, onChanged }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl bg-card border border-border max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-lg bg-card border border-border max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Movimientos</DialogTitle>
         </DialogHeader>

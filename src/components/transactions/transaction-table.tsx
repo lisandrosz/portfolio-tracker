@@ -1,13 +1,5 @@
 "use client";
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
@@ -24,12 +16,12 @@ interface TransactionTableProps {
 }
 
 const typeColors: Record<string, string> = {
-  buy: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  sell: "bg-red-50 text-red-700 border-red-200",
-  deposit: "bg-blue-50 text-blue-700 border-blue-200",
-  withdrawal: "bg-orange-50 text-orange-700 border-orange-200",
-  interest: "bg-purple-50 text-purple-700 border-purple-200",
-  dividend: "bg-amber-50 text-amber-700 border-amber-200",
+  buy: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
+  sell: "bg-red-500/15 text-red-400 border-red-500/20",
+  deposit: "bg-blue-500/15 text-blue-400 border-blue-500/20",
+  withdrawal: "bg-orange-500/15 text-orange-400 border-orange-500/20",
+  interest: "bg-purple-500/15 text-purple-400 border-purple-500/20",
+  dividend: "bg-amber-500/15 text-amber-400 border-amber-500/20",
 };
 
 export function TransactionTable({
@@ -38,78 +30,65 @@ export function TransactionTable({
   showAsset = true,
 }: TransactionTableProps) {
   async function handleDelete(id: number) {
-    if (!confirm("Eliminar esta transaccion?")) return;
+    if (!confirm("Eliminar esta transacción?")) return;
     await fetch(`/api/transactions/${id}`, { method: "DELETE" });
     onRefresh();
   }
 
+  if (transactions.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
+        No hay movimientos registrados.
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Fecha</TableHead>
-            {showAsset && <TableHead>Activo</TableHead>}
-            <TableHead>Tipo</TableHead>
-            <TableHead className="text-right">Cantidad</TableHead>
-            <TableHead className="text-right">Precio</TableHead>
-            <TableHead className="text-right">Total</TableHead>
-            <TableHead className="w-12"></TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {transactions.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={showAsset ? 7 : 6}
-                className="text-center py-8 text-muted-foreground"
-              >
-                No hay transacciones registradas.
-              </TableCell>
-            </TableRow>
-          ) : (
-            transactions.map((tx) => (
-              <TableRow key={tx.id}>
-                <TableCell className="text-sm">
-                  {formatDate(tx.date)}
-                </TableCell>
-                {showAsset && (
-                  <TableCell>
-                    <span className="font-medium">{tx.asset_symbol}</span>
-                  </TableCell>
-                )}
-                <TableCell>
-                  <Badge
-                    variant="secondary"
-                    className={cn("text-xs", typeColors[tx.type])}
-                  >
-                    {TRANSACTION_TYPES[tx.type as TransactionType] || tx.type}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-right font-mono">
-                  {tx.quantity !== 0 ? formatQuantity(Math.abs(tx.quantity)) : "—"}
-                </TableCell>
-                <TableCell className="text-right font-mono">
-                  {tx.price > 0 ? formatMoney(tx.price, tx.currency) : "—"}
-                </TableCell>
-                <TableCell className="text-right font-mono font-medium">
-                  {formatMoney(tx.total, tx.currency)}
-                </TableCell>
-                <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDelete(tx.id)}
-                    className="text-muted-foreground hover:text-red-500"
-                  >
-                    <Trash2 size={16} />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+    <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border bg-card">
+      {transactions.map((tx) => (
+        <div
+          key={tx.id}
+          className="flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4"
+        >
+          {/* Left: type + asset + date */}
+          <div className="flex min-w-0 items-center gap-3">
+            <Badge
+              variant="secondary"
+              className={cn("shrink-0 text-xs", typeColors[tx.type])}
+            >
+              {TRANSACTION_TYPES[tx.type as TransactionType] || tx.type}
+            </Badge>
+            <div className="min-w-0">
+              {showAsset && (
+                <div className="truncate font-medium">{tx.asset_symbol}</div>
+              )}
+              <div className="text-xs text-muted-foreground">{formatDate(tx.date)}</div>
+            </div>
+          </div>
+
+          {/* Right: amount (+ qty @ price) + delete */}
+          <div className="flex shrink-0 items-center gap-1.5">
+            <div className="text-right">
+              <div className="font-mono text-sm font-medium">
+                {formatMoney(tx.total, tx.currency)}
+              </div>
+              {tx.quantity !== 0 && tx.price > 0 && (
+                <div className="font-mono text-xs text-muted-foreground">
+                  {formatQuantity(Math.abs(tx.quantity))} @ {formatMoney(tx.price, tx.currency)}
+                </div>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => handleDelete(tx.id)}
+              className="text-muted-foreground hover:text-red-400"
+            >
+              <Trash2 size={16} />
+            </Button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

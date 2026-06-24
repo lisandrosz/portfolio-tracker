@@ -21,6 +21,7 @@ export interface Asset {
 export interface AssetWithValue extends Asset {
   current_value: number; // USD cents
   net_invested: number; // USD cents (deposits/buys - withdrawals/sells)
+  gross_invested: number; // USD cents (sum of inflows only — % denominator)
   profit_loss: number; // USD cents (current_value - net_invested)
   profit_loss_pct: number; // percentage
   allocation_pct: number; // percentage of total portfolio

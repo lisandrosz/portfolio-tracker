@@ -56,6 +56,7 @@ export async function GET() {
         ...asset,
         current_value: currentValue,
         net_invested: netInvested,
+        gross_invested: grossInvested,
         profit_loss: profitLoss,
         profit_loss_pct: profitLossPct,
         allocation_pct: 0,

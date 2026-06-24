@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trash2, ListOrdered } from "lucide-react";
-import { ASSET_TYPES, isBoxType, type AssetType } from "@/lib/constants";
+import { ASSET_TYPES, isBoxType, isCashType, type AssetType } from "@/lib/constants";
 import { centsToUsd, formatMoney, formatPercent, formatQuantity } from "@/lib/formatters";
 import { AssetForm } from "@/components/assets/asset-form";
 import { OrderForm } from "./order-form";
@@ -32,6 +32,15 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
   const [tab, setTab] = useState("all");
 
   const shown = assets.filter((a) => TABS.find((t) => t.key === tab)!.match(a.type));
+
+  // Totals for the footer summary (sum of the rows currently shown).
+  const totalValue = shown.reduce((s, a) => s + a.current_value, 0);
+  const invested = shown.filter((a) => !isCashType(a.type)); // exclude cash from performance
+  const totalInvested = invested.reduce((s, a) => s + a.net_invested, 0);
+  const totalGain = invested.reduce((s, a) => s + a.profit_loss, 0);
+  const totalGross = invested.reduce((s, a) => s + a.gross_invested, 0);
+  const totalPct = totalGross > 0 ? (totalGain / totalGross) * 100 : 0;
+  const hasInvested = invested.length > 0;
 
   async function handleDelete(id: number) {
     if (!confirm("Eliminar este activo y todas sus transacciones?")) return;
@@ -143,6 +152,39 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
               })
             )}
           </tbody>
+          {shown.length > 0 && (
+            <tfoot>
+              <tr className="border-t border-border bg-muted/30 text-sm">
+                <td className="px-4 py-3" colSpan={4}>
+                  <span className="font-medium">Total</span>
+                  {hasInvested && (
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      Invertido {mask(centsToUsd(totalInvested), hidden)}
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right font-mono font-semibold">
+                  {mask(centsToUsd(totalValue), hidden)}
+                </td>
+                <td
+                  className={cn(
+                    "px-4 py-3 text-right font-mono font-semibold",
+                    totalGain >= 0 ? "text-emerald-400" : "text-red-400"
+                  )}
+                >
+                  {hasInvested ? (
+                    <>
+                      {mask(centsToUsd(totalGain), hidden)}
+                      <span className="ml-1 text-xs opacity-70">{formatPercent(totalPct)}</span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3"></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
