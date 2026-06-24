@@ -154,34 +154,36 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
           </tbody>
           {shown.length > 0 && (
             <tfoot>
-              <tr className="border-t border-border bg-muted/30 text-sm">
-                <td className="px-4 py-3" colSpan={4}>
-                  <span className="font-medium">Total</span>
+              <tr className="border-t-2 border-primary/30 bg-primary/5 text-sm">
+                <td className="px-4 py-3.5" colSpan={4}>
+                  <span className="font-semibold uppercase tracking-wide text-primary">
+                    Total
+                  </span>
                   {hasInvested && (
                     <span className="ml-2 text-xs text-muted-foreground">
                       Invertido {mask(centsToUsd(totalInvested), hidden)}
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-right font-mono font-semibold">
+                <td className="px-4 py-3.5 text-right font-mono font-bold">
                   {mask(centsToUsd(totalValue), hidden)}
                 </td>
                 <td
                   className={cn(
-                    "px-4 py-3 text-right font-mono font-semibold",
+                    "px-4 py-3.5 text-right font-mono font-bold",
                     totalGain >= 0 ? "text-emerald-400" : "text-red-400"
                   )}
                 >
                   {hasInvested ? (
                     <>
                       {mask(centsToUsd(totalGain), hidden)}
-                      <span className="ml-1 text-xs opacity-70">{formatPercent(totalPct)}</span>
+                      <span className="ml-1 text-xs opacity-80">{formatPercent(totalPct)}</span>
                     </>
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
                 </td>
-                <td className="px-4 py-3"></td>
+                <td className="px-4 py-3.5"></td>
               </tr>
             </tfoot>
           )}
