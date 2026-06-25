@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import type { PortfolioSnapshot } from "@/types";
 
 const PERIODS: { key: string; label: string }[] = [
+  { key: "1W", label: "7d" },
   { key: "1M", label: "30d" },
   { key: "3M", label: "3m" },
   { key: "6M", label: "6m" },

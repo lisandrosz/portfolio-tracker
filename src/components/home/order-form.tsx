@@ -27,6 +27,7 @@ import {
   type AssetType,
 } from "@/lib/constants";
 import { Plus, Loader2 } from "lucide-react";
+import { formatMoney } from "@/lib/formatters";
 import type { Asset } from "@/types";
 
 const NEW = "__new__";
@@ -408,7 +409,20 @@ export function OrderForm({ assets, onSaved }: Props) {
           {/* Amounts */}
           {box ? (
             <div className="space-y-2">
-              <Label>{isNew ? `Saldo inicial (${currency})` : `Monto (${currency})`}</Label>
+              <div className="flex items-center justify-between">
+                <Label>{isNew ? `Saldo inicial (${currency})` : `Monto (${currency})`}</Label>
+                {!isNew && orderType === "withdrawal" && selected && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm({ ...form, amount: (selected.current_price / 100).toString() })
+                    }
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    Retirar todo
+                  </button>
+                )}
+              </div>
               <Input
                 type="number"
                 step="any"
@@ -417,6 +431,11 @@ export function OrderForm({ assets, onSaved }: Props) {
                 placeholder="1000"
                 required
               />
+              {!isNew && orderType === "withdrawal" && selected && (
+                <p className="text-xs text-muted-foreground">
+                  Saldo disponible: {formatMoney(selected.current_price, currency)}
+                </p>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4">

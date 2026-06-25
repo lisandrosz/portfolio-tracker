@@ -50,6 +50,7 @@ export const INFLOW_TYPES: TransactionType[] = ["buy", "deposit"];
 export const OUTFLOW_TYPES: TransactionType[] = ["sell", "withdrawal"];
 
 export const PERIODS = {
+  "1W": 7,
   "1M": 30,
   "3M": 90,
   "6M": 180,
