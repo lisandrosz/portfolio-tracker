@@ -1,15 +1,34 @@
 import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
 import { autoSnapshot } from "@/lib/snapshot";
+import { isInstallmentType, isDebtType } from "@/lib/constants";
 import { z } from "zod";
 
 const updateAssetSchema = z.object({
   name: z.string().min(1).optional(),
   symbol: z.string().min(1).optional(),
-  type: z.enum(["crypto", "fci", "managed", "plazo_fijo", "cash_usd", "cash_ars"]).optional(),
+  type: z
+    .enum([
+      "crypto",
+      "fci",
+      "terreno",
+      "managed",
+      "plazo_fijo",
+      "cash_usd",
+      "cash_ars",
+      "por_cobrar",
+      "por_pagar",
+    ])
+    .optional(),
   coingecko_id: z.string().nullable().optional(),
   fund_name: z.string().nullable().optional(),
+  group_name: z.string().nullable().optional(), // roll-up label
   current_price: z.number().optional(), // native cents (manual balance / valuation for box assets)
+  // Installment assets. `current_price` is deliberately not editable for them:
+  // it is derived from the cuota ledger and a manual write would desync it.
+  purchase_total: z.number().optional(), // native cents — agreed price
+  purchase_total_usd: z.number().optional(), // USD cents — frozen appraisal
+  installments_total: z.number().int().min(0).optional(),
   notes: z.string().nullable().optional(),
 });
 
@@ -39,8 +58,23 @@ export async function PUT(
     const data = updateAssetSchema.parse(body);
 
     const db = await getDb();
-    const existing = await db.prepare("SELECT * FROM assets WHERE id = ?").get(id);
+    const existing = (await db.prepare("SELECT * FROM assets WHERE id = ?").get(id)) as
+      | { type: string }
+      | undefined;
     if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
+
+    if (data.current_price !== undefined && isInstallmentType(existing.type)) {
+      return Response.json(
+        { error: "El saldo pagado de un terreno se deriva de las cuotas" },
+        { status: 400 }
+      );
+    }
+    if (data.current_price !== undefined && isDebtType(existing.type)) {
+      return Response.json(
+        { error: "El saldo de una deuda se deriva de sus altas y pagos" },
+        { status: 400 }
+      );
+    }
 
     const fields: string[] = [];
     const values: (string | number | null)[] = [];
@@ -48,7 +82,11 @@ export async function PUT(
     for (const [key, value] of Object.entries(data)) {
       if (value !== undefined) {
         fields.push(`${key} = ?`);
-        values.push(key === "symbol" && typeof value === "string" ? value.toUpperCase() : value);
+        if (key === "symbol" && typeof value === "string") values.push(value.toUpperCase());
+        // Blank means "no group", not a group literally named "".
+        else if (key === "group_name" && typeof value === "string")
+          values.push(value.trim() || null);
+        else values.push(value);
       }
     }
 

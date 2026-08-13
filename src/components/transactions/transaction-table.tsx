@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
 import { TRANSACTION_TYPES } from "@/lib/constants";
-import { formatMoney, formatDate, formatQuantity } from "@/lib/formatters";
+import { formatMoney, formatDate, formatQuantity, centsToUsd } from "@/lib/formatters";
 import type { Transaction } from "@/types";
 import type { TransactionType } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,10 @@ const typeColors: Record<string, string> = {
   sell: "bg-red-500/15 text-red-400 border-red-500/20",
   deposit: "bg-blue-500/15 text-blue-400 border-blue-500/20",
   withdrawal: "bg-orange-500/15 text-orange-400 border-orange-500/20",
+  cuota: "bg-sky-500/15 text-sky-400 border-sky-500/20",
+  gasto: "bg-violet-500/15 text-violet-400 border-violet-500/20",
+  alta: "bg-rose-500/15 text-rose-400 border-rose-500/20",
+  pago: "bg-teal-500/15 text-teal-400 border-teal-500/20",
   interest: "bg-purple-500/15 text-purple-400 border-purple-500/20",
   dividend: "bg-amber-500/15 text-amber-400 border-amber-500/20",
 };
@@ -75,6 +79,18 @@ export function TransactionTable({
               {tx.quantity !== 0 && tx.price > 0 && (
                 <div className="font-mono text-xs text-muted-foreground">
                   {formatQuantity(Math.abs(tx.quantity))} @ {formatMoney(tx.price, tx.currency)}
+                </div>
+              )}
+              {/* For ARS rows, the USD frozen that day and the rate it used. */}
+              {tx.currency === "ARS" && tx.total_usd > 0 && (
+                <div className="font-mono text-xs text-muted-foreground">
+                  {centsToUsd(tx.total_usd)}
+                  {tx.fx_rate ? (
+                    <span className="opacity-70">
+                      {" "}
+                      @ ${tx.fx_rate.toLocaleString("es-AR", { maximumFractionDigits: 0 })}
+                    </span>
+                  ) : null}
                 </div>
               )}
             </div>

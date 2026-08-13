@@ -46,12 +46,17 @@ export function HistoryChart({ refreshKey }: Props) {
     load();
   }, [load, refreshKey]);
 
-  const data = snapshots.map((s) => ({
-    date: s.date,
-    value: s.total_value / 100,
-    invested: s.total_cost / 100,
-    gain: (s.total_value - s.total_cost) / 100,
-  }));
+  // Plot net worth, matching the header: gross assets alone would overstate it
+  // while a terreno is still being paid off.
+  const data = snapshots.map((s) => {
+    const net = s.total_value - (s.total_liabilities ?? 0);
+    return {
+      date: s.date,
+      value: net / 100,
+      invested: s.total_cost / 100,
+      gain: (net - s.total_cost) / 100,
+    };
+  });
 
   const isGain = metric === "gain";
   const last = data[data.length - 1];

@@ -1,7 +1,13 @@
 import getDb from "@/lib/db";
 import { getCurrentBlue } from "@/lib/dolar-api";
-import { usdCents, netInvestedUsd, grossInvestedUsd } from "@/lib/portfolio";
-import { isCashType } from "@/lib/constants";
+import { usdCents, netInvestedUsd, grossInvestedUsd, installmentStats } from "@/lib/portfolio";
+import {
+  isCashType,
+  isInstallmentType,
+  isDebtType,
+  isPayableType,
+  isNonPerformingType,
+} from "@/lib/constants";
 import type { Asset } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -34,20 +40,47 @@ export async function GET() {
     grossByAsset.set(assetId, grossInvestedUsd(rows));
   }
 
-  let totalValue = 0; // net worth (investments + cash)
+  let totalValue = 0; // gross assets (investments + cash), before debt
+  let totalLiabilities = 0; // debt still owed, at today's rate
   let liquidity = 0; // cash only
+  let receivables = 0; // money others owe me
+  let payables = 0; // money I owe (a subset of totalLiabilities)
   let investedValue = 0; // non-cash value
+  let investedLiabilities = 0; // non-cash debt
   let investedCapital = 0; // non-cash net invested
   let investedGross = 0; // non-cash gross invested (for %)
   const allocationByType: Record<string, number> = {};
 
   const assetsWithValue = assets
     .map((asset) => {
-      const nativeValue = Math.round(asset.quantity * asset.current_price);
-      const currentValue = usdCents(nativeValue, asset.currency, blue);
-      const netInvested = investedByAsset.get(asset.id) ?? 0;
-      const grossInvested = grossByAsset.get(asset.id) ?? 0;
-      const profitLoss = currentValue - netInvested;
+      let currentValue: number;
+      let liability = 0;
+      let installmentsPaid = 0;
+
+      if (isInstallmentType(asset.type)) {
+        // Valued at its frozen USD appraisal, with the remaining ARS debt
+        // converted at today's rate — so devaluation melts the debt instead of
+        // shrinking the asset.
+        const stats = installmentStats(asset, grouped.get(asset.id) ?? [], blue);
+        currentValue = stats.value;
+        liability = stats.liability;
+        installmentsPaid = stats.installmentsPaid;
+      } else if (isDebtType(asset.type)) {
+        // current_price is the outstanding balance, derived from the ledger.
+        // Which side of the balance sheet it lands on is the only difference.
+        if (isPayableType(asset.type)) liability = asset.current_price;
+        currentValue = isPayableType(asset.type) ? 0 : asset.current_price;
+      } else {
+        const nativeValue = Math.round(asset.quantity * asset.current_price);
+        currentValue = usdCents(nativeValue, asset.currency, blue);
+      }
+
+      // Debts carry no invested capital and no return: USD lent against USD
+      // repaid. Reporting a P&L for them would be noise.
+      const netInvested = isDebtType(asset.type) ? 0 : investedByAsset.get(asset.id) ?? 0;
+      const grossInvested = isDebtType(asset.type) ? 0 : grossByAsset.get(asset.id) ?? 0;
+      const equity = currentValue - liability;
+      const profitLoss = isDebtType(asset.type) ? 0 : equity - netInvested;
       // % return is on gross capital deployed, so it stays correct even after
       // withdrawing more than was put in (net invested <= 0).
       const profitLossPct = grossInvested > 0 ? (profitLoss / grossInvested) * 100 : 0;
@@ -55,6 +88,9 @@ export async function GET() {
       return {
         ...asset,
         current_value: currentValue,
+        liability,
+        equity,
+        installments_paid: installmentsPaid,
         net_invested: netInvested,
         gross_invested: grossInvested,
         profit_loss: profitLoss,
@@ -62,17 +98,22 @@ export async function GET() {
         allocation_pct: 0,
       };
     })
-    // Keep active holdings and positions that still carry realized P&L.
-    .filter((a) => a.current_value > 0 || Math.abs(a.net_invested) > 0);
+    // Keep active holdings and positions that still carry realized P&L or debt.
+    .filter((a) => a.current_value > 0 || a.liability > 0 || Math.abs(a.net_invested) > 0);
 
   for (const a of assetsWithValue) {
     totalValue += a.current_value;
+    totalLiabilities += a.liability;
     allocationByType[a.type] = (allocationByType[a.type] || 0) + a.current_value;
-    if (isCashType(a.type)) {
-      // Cash = liquidity: counts toward net worth, NOT toward performance.
-      liquidity += a.current_value;
-    } else {
+    if (isCashType(a.type)) liquidity += a.current_value;
+    if (isDebtType(a.type)) {
+      if (isPayableType(a.type)) payables += a.liability;
+      else receivables += a.current_value;
+    }
+    // Cash and debts count toward net worth but not toward performance.
+    if (!isNonPerformingType(a.type)) {
       investedValue += a.current_value;
+      investedLiabilities += a.liability;
       investedCapital += a.net_invested;
       investedGross += grossByAsset.get(a.id) ?? 0;
     }
@@ -82,15 +123,19 @@ export async function GET() {
     a.allocation_pct = totalValue > 0 ? (a.current_value / totalValue) * 100 : 0;
   }
 
-  const totalProfitLoss = investedValue - investedCapital;
+  const totalProfitLoss = investedValue - investedLiabilities - investedCapital;
   const totalProfitLossPct =
     investedGross > 0 ? (totalProfitLoss / investedGross) * 100 : 0;
 
   return Response.json({
     data: {
       total_value: totalValue,
+      total_liabilities: totalLiabilities,
+      net_worth: totalValue - totalLiabilities,
       total_invested: investedCapital,
       liquidity,
+      receivables,
+      payables,
       total_profit_loss: totalProfitLoss,
       total_profit_loss_pct: totalProfitLossPct,
       dolar_blue: blue,

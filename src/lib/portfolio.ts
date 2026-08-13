@@ -1,5 +1,6 @@
 import type { Db } from "./db";
 import { INFLOW_TYPES, OUTFLOW_TYPES } from "./constants";
+import type { Asset, InstallmentStats } from "@/types";
 
 type DB = Db;
 
@@ -94,4 +95,118 @@ export async function applyBoxFlow(db: DB, assetId: number, deltaNative: number)
       "UPDATE assets SET current_price = MAX(0, current_price + ?), price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
     )
     .run(deltaNative, assetId);
+}
+
+/** Asset fields installmentStats needs. Keeps callers free to pass a full Asset. */
+type InstallmentAsset = Pick<
+  Asset,
+  "purchase_total" | "purchase_total_usd" | "installments_total"
+>;
+
+/**
+ * Derived figures for an installment asset (terreno).
+ *
+ * The asset is valued at `purchase_total_usd`, an appraisal FROZEN in USD at the
+ * purchase-day rate, while the debt still owed is converted at TODAY's rate. That
+ * split is deliberate: the land keeps its dollar value while an ARS-denominated
+ * debt melts away with devaluation, which is the real economic gain.
+ *
+ * Everything already paid sums the per-transaction frozen `total_usd` — never a
+ * fresh conversion — so the answer to "how much did this cost me in dollars"
+ * cannot drift after the fact.
+ */
+export function installmentStats(
+  asset: InstallmentAsset,
+  txns: TxRow[],
+  blue: number | null
+): InstallmentStats {
+  let paidNative = 0;
+  let paidUsd = 0;
+  let expensesNative = 0;
+  let expensesUsd = 0;
+  let installmentsPaid = 0;
+
+  for (const t of txns) {
+    if (t.type === "cuota") {
+      paidNative += t.total;
+      paidUsd += t.total_usd;
+      installmentsPaid++;
+    } else if (t.type === "gasto") {
+      expensesNative += t.total;
+      expensesUsd += t.total_usd;
+    }
+  }
+
+  // Expenses are a real outlay but they don't buy down the debt.
+  const remainingNative = Math.max(0, asset.purchase_total - paidNative);
+  const totalPaidNative = paidNative + expensesNative;
+  const totalPaidUsd = paidUsd + expensesUsd;
+
+  return {
+    value: asset.purchase_total_usd,
+    liability: usdCents(remainingNative, "ARS", blue),
+    paidNative,
+    paidUsd,
+    expensesNative,
+    expensesUsd,
+    totalPaidNative,
+    totalPaidUsd,
+    remainingNative,
+    remainingUsd: usdCents(remainingNative, "ARS", blue),
+    installmentsPaid,
+    installmentsTotal: asset.installments_total,
+    progressPct: asset.purchase_total > 0 ? (paidNative / asset.purchase_total) * 100 : 0,
+    // Derived from the frozen totals, so it reflects the rates actually paid.
+    avgFxRate: totalPaidUsd > 0 ? totalPaidNative / totalPaidUsd : null,
+  };
+}
+
+/**
+ * Outstanding balance of a DEBT asset (USD cents) from its ledger: altas raise
+ * it, pagos settle it. Never negative — overpaying closes the debt, it doesn't
+ * flip it into the other direction.
+ */
+export function debtBalance(txns: TxRow[]): number {
+  let balance = 0;
+  for (const t of txns) {
+    if (t.type === "alta") balance += t.total_usd;
+    else if (t.type === "pago") balance -= t.total_usd;
+  }
+  return Math.max(0, balance);
+}
+
+/**
+ * Recompute a DEBT asset's outstanding balance from its transactions.
+ * Derived rather than incremented, so deleting a mistyped payment self-heals.
+ */
+export async function recalcDebtAsset(db: DB, assetId: number) {
+  const txns = (await db
+    .prepare("SELECT type, quantity, total, total_usd FROM transactions WHERE asset_id = ?")
+    .all(assetId)) as TxRow[];
+
+  await db
+    .prepare(
+      "UPDATE assets SET current_price = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+    )
+    .run(debtBalance(txns), assetId);
+}
+
+/**
+ * Recompute an INSTALLMENT asset's paid-in balance from its transactions.
+ * `current_price` holds cuotas paid in native cents (expenses excluded, since
+ * they don't reduce the debt). Mirrors recalcUnitAsset: derive, never increment,
+ * so deleting a transaction self-heals.
+ */
+export async function recalcInstallmentAsset(db: DB, assetId: number) {
+  const row = (await db
+    .prepare(
+      "SELECT COALESCE(SUM(total), 0) AS paid FROM transactions WHERE asset_id = ? AND type = 'cuota'"
+    )
+    .get(assetId)) as { paid: number } | undefined;
+
+  await db
+    .prepare(
+      "UPDATE assets SET current_price = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+    )
+    .run(row?.paid ?? 0, assetId);
 }

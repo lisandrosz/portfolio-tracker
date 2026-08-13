@@ -24,6 +24,8 @@ import {
   ASSET_CURRENCY,
   POPULAR_CRYPTOS,
   isBoxType,
+  isInstallmentType,
+  isDebtType,
   type AssetType,
 } from "@/lib/constants";
 import { numberToCents } from "@/lib/formatters";
@@ -47,8 +49,14 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
     type: (asset?.type || "crypto") as AssetType,
     coingecko_id: asset?.coingecko_id || "",
     fund_name: asset?.fund_name || "",
+    group_name: asset?.group_name || "",
     quantity: asset?.quantity?.toString() || "",
     price: asset ? (asset.current_price / 100).toString() : "",
+    purchase_total: asset?.purchase_total ? (asset.purchase_total / 100).toString() : "",
+    purchase_total_usd: asset?.purchase_total_usd
+      ? (asset.purchase_total_usd / 100).toString()
+      : "",
+    installments_total: asset?.installments_total ? asset.installments_total.toString() : "",
     date: asset?.created_at
       ? asset.created_at.split("T")[0]
       : new Date().toISOString().split("T")[0],
@@ -67,6 +75,8 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
 
   const type = form.type;
   const box = isBoxType(type);
+  const installment = isInstallmentType(type);
+  const debt = isDebtType(type);
   const currency = ASSET_CURRENCY[type];
 
   useEffect(() => {
@@ -173,31 +183,46 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
     try {
       if (isEdit) {
         // Edit: update name, notes, current price/balance, price source.
-        const body = {
+        const body: Record<string, unknown> = {
           name: form.name,
           symbol: form.symbol,
           coingecko_id: type === "crypto" && form.coingecko_id ? form.coingecko_id : null,
           fund_name: type === "fci" && form.fund_name ? form.fund_name : null,
-          current_price: numberToCents(parseFloat(form.price) || 0),
+          group_name: form.group_name || null,
           notes: form.notes || null,
         };
+        if (installment) {
+          // current_price is derived from the cuota ledger — the API rejects it.
+          body.purchase_total = numberToCents(parseFloat(form.purchase_total) || 0);
+          body.purchase_total_usd = numberToCents(parseFloat(form.purchase_total_usd) || 0);
+          body.installments_total = parseInt(form.installments_total) || 0;
+        } else if (debt) {
+          // Balance comes from the alta/pago ledger; only the label is editable.
+        } else {
+          body.current_price = numberToCents(parseFloat(form.price) || 0);
+        }
         await fetch(`/api/assets/${asset!.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
       } else {
-        const body = {
+        const body: Record<string, unknown> = {
           name: form.name,
           symbol: form.symbol,
           type,
           coingecko_id: type === "crypto" && form.coingecko_id ? form.coingecko_id : null,
           fund_name: type === "fci" && form.fund_name ? form.fund_name : null,
-          quantity: box ? 0 : parseFloat(form.quantity) || 0,
-          price: parseFloat(form.price) || 0,
+          group_name: form.group_name || null,
+          quantity: box || installment || debt ? 0 : parseFloat(form.quantity) || 0,
+          price: installment ? 0 : parseFloat(form.price) || 0,
           date: form.date,
           notes: form.notes || null,
         };
+        if (installment) {
+          body.purchase_total = parseFloat(form.purchase_total) || 0;
+          body.installments_total = parseInt(form.installments_total) || 0;
+        }
         await fetch("/api/assets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -338,55 +363,135 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
           )}
 
           {/* Amounts */}
-          <div className={box ? "grid grid-cols-2 gap-4" : "grid grid-cols-3 gap-4"}>
-            {!box && (
-              <div className="space-y-2">
-                <Label>Cantidad</Label>
-                <Input
-                  type="number"
-                  step="any"
-                  value={form.quantity}
-                  onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-                  placeholder="0.05"
-                />
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label>{priceLabel}</Label>
-              <div className="relative">
-                <Input
-                  type="number"
-                  step="any"
-                  value={form.price}
-                  onChange={(e) => setForm({ ...form, price: e.target.value })}
-                  className={fetchingPrice ? "pr-8" : ""}
-                />
-                {fetchingPrice && (
-                  <Loader2
-                    size={14}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
+          {debt ? (
+            <p className="rounded-md bg-muted p-2 text-xs text-muted-foreground">
+              El saldo sale de las altas y pagos cargados. Para corregirlo, editá los
+              movimientos en vez de este campo.
+            </p>
+          ) : installment ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Precio total ({currency})</Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={form.purchase_total}
+                    onChange={(e) => setForm({ ...form, purchase_total: e.target.value })}
+                    placeholder="150000000"
                   />
-                )}
+                </div>
+                <div className="space-y-2">
+                  <Label>Cantidad de cuotas</Label>
+                  <Input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={form.installments_total}
+                    onChange={(e) => setForm({ ...form, installments_total: e.target.value })}
+                    placeholder="60"
+                  />
+                </div>
               </div>
+              {isEdit && (
+                <div className="space-y-2">
+                  <Label>Tasación (USD)</Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={form.purchase_total_usd}
+                    onChange={(e) => setForm({ ...form, purchase_total_usd: e.target.value })}
+                    placeholder="100000"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Valor en dólares congelado al día de la compra. No se mueve con el blue: eso es
+                    lo que hace que la devaluación licúe la deuda en vez de achicar el terreno.
+                    Editalo solo si el terreno se revaluó de verdad.
+                  </p>
+                </div>
+              )}
+              {isEdit && (
+                <p className="rounded-md bg-muted p-2 text-xs text-muted-foreground">
+                  El saldo pagado no se edita acá: sale de las cuotas cargadas. Para corregirlo,
+                  borrá o agregá cuotas en Movimientos.
+                </p>
+              )}
+              {!isEdit && (
+                <div className="space-y-2">
+                  <Label>Fecha de compra</Label>
+                  <Input
+                    type="date"
+                    value={form.date}
+                    onChange={(e) => handleDateChange(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
             </div>
-            {!isEdit && (
+          ) : (
+            <div className={box ? "grid grid-cols-2 gap-4" : "grid grid-cols-3 gap-4"}>
+              {!box && (
+                <div className="space-y-2">
+                  <Label>Cantidad</Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={form.quantity}
+                    onChange={(e) => setForm({ ...form, quantity: e.target.value })}
+                    placeholder="0.05"
+                  />
+                </div>
+              )}
               <div className="space-y-2">
-                <Label>Fecha</Label>
-                <Input
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => handleDateChange(e.target.value)}
-                  required
-                />
+                <Label>{priceLabel}</Label>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    step="any"
+                    value={form.price}
+                    onChange={(e) => setForm({ ...form, price: e.target.value })}
+                    className={fetchingPrice ? "pr-8" : ""}
+                  />
+                  {fetchingPrice && (
+                    <Loader2
+                      size={14}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
+                    />
+                  )}
+                </div>
               </div>
-            )}
-          </div>
+              {!isEdit && (
+                <div className="space-y-2">
+                  <Label>Fecha</Label>
+                  <Input
+                    type="date"
+                    value={form.date}
+                    onChange={(e) => handleDateChange(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {type === "crypto" && form.coingecko_id && !isEdit && (
             <p className="text-xs text-muted-foreground">
               Al cambiar la fecha se busca el precio histórico desde CoinGecko
             </p>
           )}
+
+          <div className="space-y-2">
+            <Label>Grupo (opcional)</Label>
+            <Input
+              value={form.group_name}
+              onChange={(e) => setForm({ ...form, group_name: e.target.value })}
+              placeholder="Ej: BingX Copytrading"
+            />
+            <p className="text-xs text-muted-foreground">
+              Los activos con el mismo grupo se muestran juntos, con su total y rendimiento
+              consolidado. Útil para separar estrategias de copytrading.
+            </p>
+          </div>
 
           <div className="space-y-2">
             <Label>Notas</Label>

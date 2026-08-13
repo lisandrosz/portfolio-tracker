@@ -33,9 +33,15 @@ interface Props {
 export function PortfolioHeader({ summary, lastUpdated, onOpenSettings }: Props) {
   const { hidden, toggle } = useBalance();
   const profit = (summary?.total_profit_loss ?? 0) >= 0;
-  const value = summary ? centsToUsd(summary.total_value) : "$0.00";
+  const debt = summary?.total_liabilities ?? 0;
+  const hasDebt = debt > 0;
+  // Headline is net worth: with debt outstanding, gross assets overstate it.
+  const value = summary ? centsToUsd(summary.net_worth ?? summary.total_value) : "$0.00";
   const invertido = summary ? centsToUsd(summary.total_invested) : "$0.00";
   const liquidez = summary ? centsToUsd(summary.liquidity) : "$0.00";
+  const deuda = centsToUsd(debt);
+  const meDeben = centsToUsd(summary?.receivables ?? 0);
+  const hasReceivables = (summary?.receivables ?? 0) > 0;
   const hasLiquidity = (summary?.liquidity ?? 0) > 0;
   const pnl = summary ? centsToUsd(summary.total_profit_loss) : "$0.00";
   const pct = summary ? formatPercent(summary.total_profit_loss_pct) : "+0.00%";
@@ -54,7 +60,9 @@ export function PortfolioHeader({ summary, lastUpdated, onOpenSettings }: Props)
       </div>
 
       <div className="flex flex-col items-center gap-1">
-        <p className="text-sm text-muted-foreground">Panel de mi portfolio</p>
+        <p className="text-sm text-muted-foreground">
+          {hasDebt ? "Patrimonio neto" : "Panel de mi portfolio"}
+        </p>
         <div className="flex items-center gap-3">
           <h1 className="text-4xl font-bold tracking-tight text-primary md:text-5xl">
             {mask(value, hidden)}
@@ -94,6 +102,24 @@ export function PortfolioHeader({ summary, lastUpdated, onOpenSettings }: Props)
             <div className="flex flex-col items-center">
               <span className="text-xs text-muted-foreground">Liquidez</span>
               <span className="font-semibold">{mask(liquidez, hidden)}</span>
+            </div>
+          </>
+        )}
+        {hasReceivables && (
+          <>
+            <div className="h-7 w-px bg-border" />
+            <div className="flex flex-col items-center">
+              <span className="text-xs text-muted-foreground">Me deben</span>
+              <span className="font-semibold text-sky-400">{mask(meDeben, hidden)}</span>
+            </div>
+          </>
+        )}
+        {hasDebt && (
+          <>
+            <div className="h-7 w-px bg-border" />
+            <div className="flex flex-col items-center">
+              <span className="text-xs text-muted-foreground">Debo</span>
+              <span className="font-semibold text-red-400">−{mask(deuda, hidden)}</span>
             </div>
           </>
         )}

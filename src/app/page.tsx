@@ -86,7 +86,7 @@ export default function HomePage() {
           <HistoryChart refreshKey={chartKey} />
           <AllocationDonut
             assets={summary?.assets || []}
-            totalValue={summary?.total_value || 0}
+            totalValue={summary?.net_worth ?? summary?.total_value ?? 0}
           />
         </div>
 

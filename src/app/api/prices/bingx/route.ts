@@ -52,11 +52,28 @@ export async function POST() {
     });
   }
 
-  const updateSql =
-    "UPDATE assets SET current_price = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?";
-  await db.batch(managed.map((a) => ({ sql: updateSql, args: [cents, a.id] })));
+  // The API reports one account-wide equity with no per-strategy breakdown, so
+  // it can only be attributed when a single managed account exists. Writing it
+  // into each of several strategies would multiply the balance instead of
+  // splitting it.
+  if (managed.length > 1) {
+    return Response.json({
+      data: {
+        equity: result.equity,
+        updated: 0,
+        breakdown: result.breakdown,
+        message: `BingX informa un equity único (${result.equity}) sin desglose por estrategia. Hay ${managed.length} cuentas administradas, así que los saldos se mantienen manuales.`,
+      },
+    });
+  }
+
+  await db
+    .prepare(
+      "UPDATE assets SET current_price = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+    )
+    .run(cents, managed[0].id);
 
   await autoSnapshot();
 
-  return Response.json({ data: { equity: result.equity, updated: managed.length, breakdown: result.breakdown } });
+  return Response.json({ data: { equity: result.equity, updated: 1, breakdown: result.breakdown } });
 }

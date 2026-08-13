@@ -15,11 +15,13 @@ interface Props {
 export function AllocationDonut({ assets, totalValue }: Props) {
   const { hidden } = useBalance();
 
-  const positive = assets.filter((a) => a.current_value > 0).sort((a, b) => b.current_value - a.current_value);
+  // Slice by equity (value net of debt): a terreno's gross price would swamp the
+  // chart while most of it is still owed to the seller.
+  const positive = assets.filter((a) => a.equity > 0).sort((a, b) => b.equity - a.equity);
   const top = positive.slice(0, 5);
-  const restValue = positive.slice(5).reduce((s, a) => s + a.current_value, 0);
+  const restValue = positive.slice(5).reduce((s, a) => s + a.equity, 0);
 
-  const data = top.map((a) => ({ name: a.symbol, value: a.current_value }));
+  const data = top.map((a) => ({ name: a.symbol, value: a.equity }));
   if (restValue > 0) data.push({ name: "Otros", value: restValue });
 
   const pct = (v: number) => (totalValue > 0 ? ((v / totalValue) * 100).toFixed(2) : "0.00");

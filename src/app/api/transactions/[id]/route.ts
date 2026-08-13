@@ -1,8 +1,13 @@
 import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
 import { autoSnapshot } from "@/lib/snapshot";
-import { recalcUnitAsset, applyBoxFlow } from "@/lib/portfolio";
-import { isBoxType } from "@/lib/constants";
+import {
+  recalcUnitAsset,
+  applyBoxFlow,
+  recalcInstallmentAsset,
+  recalcDebtAsset,
+} from "@/lib/portfolio";
+import { isBoxType, isInstallmentType, isDebtType } from "@/lib/constants";
 import type { Asset } from "@/types";
 
 export async function DELETE(
@@ -23,7 +28,12 @@ export async function DELETE(
 
   await db.prepare("DELETE FROM transactions WHERE id = ?").run(id);
 
-  if (asset && isBoxType(asset.type)) {
+  if (asset && isInstallmentType(asset.type)) {
+    // Derived from the remaining cuotas, so the debt heals itself.
+    await recalcInstallmentAsset(db, tx.asset_id);
+  } else if (asset && isDebtType(asset.type)) {
+    await recalcDebtAsset(db, tx.asset_id);
+  } else if (asset && isBoxType(asset.type)) {
     // Reverse the deposit/withdrawal effect on the balance.
     const delta = tx.type === "deposit" ? -tx.total : tx.total;
     await applyBoxFlow(db, tx.asset_id, delta);
