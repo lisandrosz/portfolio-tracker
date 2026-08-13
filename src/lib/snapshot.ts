@@ -1,7 +1,12 @@
 import getDb from "./db";
 import { getCurrentBlue } from "./dolar-api";
 import { usdCents, netInvestedUsd, installmentStats, debtBalance } from "./portfolio";
-import { isInstallmentType, isDebtType, isPayableType } from "./constants";
+import {
+  isInstallmentType,
+  isDebtType,
+  isPayableType,
+  isNonPerformingType,
+} from "./constants";
 import type { Asset } from "@/types";
 
 /**
@@ -30,34 +35,50 @@ export async function autoSnapshot(blueArg?: number | null) {
   }
 
   let totalValue = 0;
-  let totalCost = 0;
   let totalLiabilities = 0;
+  // Performance is measured over holdings that can actually return something,
+  // matching the summary endpoint. Cash and debts move net worth without ever
+  // producing a gain.
+  let investedValue = 0;
+  let investedLiabilities = 0;
+  let investedCapital = 0;
   const breakdown: Record<string, number> = {};
 
   for (const asset of assets) {
     const txns = grouped.get(asset.id) ?? [];
     let value: number;
+    let liability = 0;
 
     if (isInstallmentType(asset.type)) {
       // Frozen appraisal as the value; the ARS debt is tracked separately and
       // converted at today's rate.
       const stats = installmentStats(asset, txns, blue);
       value = stats.value;
-      totalLiabilities += stats.liability;
+      liability = stats.liability;
     } else if (isDebtType(asset.type)) {
       const balance = debtBalance(txns);
       value = isPayableType(asset.type) ? 0 : balance;
-      if (isPayableType(asset.type)) totalLiabilities += balance;
+      if (isPayableType(asset.type)) liability = balance;
     } else {
       const nativeValue = Math.round(asset.quantity * asset.current_price);
       value = usdCents(nativeValue, asset.currency, blue);
     }
 
-    const invested = netInvestedUsd(txns);
     totalValue += value;
-    totalCost += invested;
+    totalLiabilities += liability;
+    if (!isNonPerformingType(asset.type)) {
+      investedValue += value;
+      investedLiabilities += liability;
+      investedCapital += netInvestedUsd(txns);
+    }
     if (value > 0) breakdown[asset.type] = (breakdown[asset.type] || 0) + value;
   }
+
+  // Stored so the chart's value - liabilities - cost equals the real gain.
+  // Summing raw contributed capital instead would let a cash withdrawal that
+  // funds a loan read as profit: the capital leaves, the value just moves.
+  const gain = investedValue - investedLiabilities - investedCapital;
+  const totalCost = totalValue - totalLiabilities - gain;
 
   if (totalValue === 0 && totalCost === 0 && totalLiabilities === 0) return;
 

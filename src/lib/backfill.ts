@@ -8,6 +8,7 @@ import {
   isInstallmentType,
   isDebtType,
   isPayableType,
+  isNonPerformingType,
 } from "./constants";
 import type { Asset } from "@/types";
 
@@ -108,8 +109,10 @@ export async function rebuildHistory(): Promise<{ days: number }> {
 
   for (const D of dates) {
     let totalValue = 0;
-    let totalCost = 0;
     let totalLiabilities = 0;
+    let investedValue = 0;
+    let investedLiabilities = 0;
+    let investedCapital = 0;
     const breakdown: Record<string, number> = {};
 
     for (const a of assets) {
@@ -131,6 +134,7 @@ export async function rebuildHistory(): Promise<{ days: number }> {
       if (owed < 0) owed = 0;
 
       let valueUsd: number;
+      let liabilityUsd = 0;
       if (a.type === "crypto") {
         const price = cryptoPrices.get(a.id)?.get(D);
         valueUsd = price != null ? Math.round(qty * price * 100) : invested;
@@ -143,13 +147,13 @@ export async function rebuildHistory(): Promise<{ days: number }> {
           valueUsd = a.purchase_total_usd;
           const remaining = Math.max(0, a.purchase_total - paidNative);
           const rate = blueSeries ? blueFromSeries(blueSeries, D) : null;
-          if (rate && rate > 0) totalLiabilities += Math.round(remaining / rate);
+          if (rate && rate > 0) liabilityUsd = Math.round(remaining / rate);
         }
       } else if (isDebtType(a.type)) {
         // Already USD, so the balance replayed from the ledger is the value —
         // no rate conversion and no historical price to look up.
         valueUsd = isPayableType(a.type) ? 0 : owed;
-        if (isPayableType(a.type)) totalLiabilities += owed;
+        if (isPayableType(a.type)) liabilityUsd = owed;
       } else {
         // FCI / box: no historical market value -> track contributed capital.
         valueUsd = invested;
@@ -157,9 +161,20 @@ export async function rebuildHistory(): Promise<{ days: number }> {
       if (valueUsd < 0) valueUsd = 0;
 
       totalValue += valueUsd;
-      totalCost += invested;
+      totalLiabilities += liabilityUsd;
+      if (!isNonPerformingType(a.type)) {
+        investedValue += valueUsd;
+        investedLiabilities += liabilityUsd;
+        investedCapital += invested;
+      }
       if (valueUsd > 0) breakdown[a.type] = (breakdown[a.type] || 0) + valueUsd;
     }
+
+    // Same derivation as autoSnapshot: cost is whatever makes
+    // value - liabilities - cost the real gain, so moving money between
+    // holdings never reads as profit.
+    const gain = investedValue - investedLiabilities - investedCapital;
+    const totalCost = totalValue - totalLiabilities - gain;
 
     const json = JSON.stringify(breakdown);
     stmts.push({
