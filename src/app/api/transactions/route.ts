@@ -7,6 +7,8 @@ import {
   applyBoxFlow,
   recalcInstallmentAsset,
   recalcDebtAsset,
+  counterAccountError,
+  writeDebtCounterLeg,
 } from "@/lib/portfolio";
 import { numberToCents, formatMoney } from "@/lib/formatters";
 import { isBoxType, isInstallmentType, isDebtType } from "@/lib/constants";
@@ -25,6 +27,9 @@ const createTransactionSchema = z.object({
   // ARS per USD to freeze this transaction with. Overrides the published blue
   // for the date, because the rate actually paid is often not the published one.
   usd_rate: z.number().positive().optional(),
+  // Account the money actually moved through (debt movements only). Optional:
+  // omit it for a debt settled outside anything tracked here.
+  counter_asset_id: z.number().nullable().optional(),
   notes: z.string().nullable().optional(),
 });
 
@@ -95,6 +100,23 @@ export async function POST(request: NextRequest) {
         { error: `No se puede registrar "${data.type}" sobre ${asset.symbol}` },
         { status: 400 }
       );
+    }
+
+    // Where the money came from or went. Validated before anything is written,
+    // so a bad account can't leave the debt leg recorded on its own.
+    let counter: Asset | undefined;
+    if (data.counter_asset_id != null) {
+      if (!debt) {
+        return Response.json(
+          { error: "La cuenta de contrapartida solo aplica a deudas" },
+          { status: 400 }
+        );
+      }
+      counter = (await db
+        .prepare("SELECT * FROM assets WHERE id = ?")
+        .get(data.counter_asset_id)) as Asset | undefined;
+      const counterError = counterAccountError(counter, asset.currency);
+      if (counterError) return Response.json({ error: counterError }, { status: 400 });
     }
 
     let qty = 0;
@@ -175,10 +197,13 @@ export async function POST(request: NextRequest) {
     const totalUsd =
       asset.currency === "ARS" ? (rate && rate > 0 ? Math.round(totalNative / rate) : 0) : totalNative;
 
+    // Both legs of a paired operation carry the same link_id (see DELETE).
+    const linkId = counter ? crypto.randomUUID() : null;
+
     const result = await db
       .prepare(
-        `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, fx_rate, currency, fee, date, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, fx_rate, currency, fee, date, notes, link_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         data.asset_id,
@@ -191,7 +216,8 @@ export async function POST(request: NextRequest) {
         asset.currency,
         feeCents,
         data.date,
-        data.notes ?? null
+        data.notes ?? null,
+        linkId
       );
 
     if (installment) {
@@ -203,6 +229,20 @@ export async function POST(request: NextRequest) {
       await applyBoxFlow(db, data.asset_id, delta);
     } else {
       await recalcUnitAsset(db, data.asset_id);
+    }
+
+    if (counter && linkId) {
+      await writeDebtCounterLeg(db, {
+        debt: asset,
+        counter,
+        movement: data.type,
+        totalNative,
+        totalUsd,
+        rate,
+        date: data.date,
+        linkId,
+        notes: data.notes,
+      });
     }
 
     // No rate argument: `rate` belongs to the transaction's date (and may be a

@@ -7,6 +7,8 @@ import {
   applyBoxFlow,
   recalcInstallmentAsset,
   recalcDebtAsset,
+  counterAccountError,
+  writeDebtCounterLeg,
 } from "@/lib/portfolio";
 import { numberToCents } from "@/lib/formatters";
 import {
@@ -42,6 +44,8 @@ const createAssetSchema = z.object({
   installments_total: z.number().int().min(0).default(0), // cuota count (installment)
   // ARS per USD to freeze with; overrides the published blue for `date`.
   usd_rate: z.number().positive().optional(),
+  // Account the opening balance of a debt moved through (debts only).
+  counter_asset_id: z.number().nullable().optional(),
   date: z.string().optional(),
   notes: z.string().nullable().optional(),
 });
@@ -74,6 +78,18 @@ export async function POST(request: NextRequest) {
       currency === "ARS" ? data.usd_rate ?? (await getBlueForDate(date)) : null;
     const toUsd = (native: number) =>
       currency === "ARS" ? (rate && rate > 0 ? Math.round(native / rate) : 0) : native;
+
+    // Account the money moved through, when the debt opens with a balance.
+    // Checked before the asset is created, so a bad account can't leave a debt
+    // recorded with no money behind it.
+    let counter: Asset | undefined;
+    if (data.counter_asset_id != null && debt && data.price > 0) {
+      counter = (await db
+        .prepare("SELECT * FROM assets WHERE id = ?")
+        .get(data.counter_asset_id)) as Asset | undefined;
+      const counterError = counterAccountError(counter, currency);
+      if (counterError) return Response.json({ error: counterError }, { status: 400 });
+    }
 
     const existing = (await db
       .prepare("SELECT * FROM assets WHERE symbol = ? AND type = ?")
@@ -127,10 +143,11 @@ export async function POST(request: NextRequest) {
       await recalcInstallmentAsset(db, assetId);
     } else if (debt && data.price > 0) {
       // Opening balance of the debt, recorded as the first alta.
+      const linkId = counter ? crypto.randomUUID() : null;
       await db
         .prepare(
-          `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, fx_rate, currency, fee, date, notes)
-         VALUES (?, 'alta', 0, 0, ?, ?, ?, ?, 0, ?, ?)`
+          `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, fx_rate, currency, fee, date, notes, link_id)
+         VALUES (?, 'alta', 0, 0, ?, ?, ?, ?, 0, ?, ?, ?)`
         )
         .run(
           assetId,
@@ -139,9 +156,26 @@ export async function POST(request: NextRequest) {
           rate,
           currency,
           date,
-          data.notes || "Saldo inicial"
+          data.notes || "Saldo inicial",
+          linkId
         );
       await recalcDebtAsset(db, assetId);
+
+      // The other half: money leaving the account you lent it from, or landing in
+      // the one you borrowed into.
+      if (counter && linkId) {
+        await writeDebtCounterLeg(db, {
+          debt: { type, name: existing?.name ?? data.name },
+          counter,
+          movement: "alta",
+          totalNative: priceCents,
+          totalUsd: toUsd(priceCents),
+          rate,
+          date,
+          linkId,
+          notes: data.notes,
+        });
+      }
     } else if (box && data.price > 0) {
       // Opening contribution (deposit).
       const totalNative = priceCents;

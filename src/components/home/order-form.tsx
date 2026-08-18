@@ -27,6 +27,7 @@ import {
   isInstallmentType,
   isDebtType,
   isPayableType,
+  debtCounterLegType,
   type AssetType,
 } from "@/lib/constants";
 import { Plus, Loader2, Lock } from "lucide-react";
@@ -35,6 +36,8 @@ import { cn } from "@/lib/utils";
 import type { Asset } from "@/types";
 
 const NEW = "__new__";
+// A debt you settle outside anything tracked here: no account leg to write.
+const NO_ACCOUNT = "__none__";
 
 interface Props {
   assets: Asset[];
@@ -54,6 +57,8 @@ export function OrderForm({ assets, onSaved }: Props) {
 
   const [assetChoice, setAssetChoice] = useState(NEW);
   const [orderType, setOrderType] = useState("buy"); // for existing assets
+  // Account a debt movement runs through (optional).
+  const [counterAccount, setCounterAccount] = useState(NO_ACCOUNT);
   const [form, setForm] = useState({
     newType: "crypto" as AssetType,
     symbol: "",
@@ -136,6 +141,7 @@ export function OrderForm({ assets, onSaved }: Props) {
     setTransferTo("");
     setAssetChoice(NEW);
     setOrderType("buy");
+    setCounterAccount(NO_ACCOUNT);
     setFundQuery("");
     setRateTouched(false);
     setForm({
@@ -160,6 +166,8 @@ export function OrderForm({ assets, onSaved }: Props) {
   function chooseAsset(v: string) {
     if (!v) return;
     setAssetChoice(v);
+    // The account belongs to the movement being loaded, not to the last one.
+    setCounterAccount(NO_ACCOUNT);
     if (v === NEW) {
       setOrderType("buy");
       return;
@@ -289,6 +297,14 @@ export function OrderForm({ assets, onSaved }: Props) {
   const boxAssets = assets.filter((a) => isBoxType(a.type));
   const fromAsset = boxAssets.find((a) => a.id.toString() === transferFrom);
 
+  // Accounts that can back a debt movement. Same currency only: settling a USD
+  // debt out of a peso account is a conversion at some rate, not a transfer, and
+  // the backend refuses to invent one.
+  const counterOptions = debt ? boxAssets.filter((a) => a.currency === currency) : [];
+  const counterAsset = counterOptions.find((a) => a.id.toString() === counterAccount);
+  // A new debt opens with an alta; an existing one moves by the chosen order type.
+  const counterFlow = debtCounterLegType(assetType, isNew ? "alta" : orderType);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -346,6 +362,8 @@ export function OrderForm({ assets, onSaved }: Props) {
           body.installments_total = parseInt(form.installments_total) || 0;
         }
         if (needsRate && rate > 0) body.usd_rate = rate;
+        // The account the lent/borrowed money moved through, if it was tracked.
+        if (debt && counterAsset) body.counter_asset_id = counterAsset.id;
 
         const res = await fetch("/api/assets", {
           method: "POST",
@@ -370,6 +388,7 @@ export function OrderForm({ assets, onSaved }: Props) {
           body.price = parseFloat(form.price) || 0;
         }
         if (needsRate && rate > 0) body.usd_rate = rate;
+        if (debt && counterAsset) body.counter_asset_id = counterAsset.id;
 
         const res = await fetch("/api/transactions", {
           method: "POST",
@@ -870,6 +889,54 @@ export function OrderForm({ assets, onSaved }: Props) {
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* The other half of a debt movement. Cancelling a debt without banking
+              the money looks exactly like losing it, so the account leg is right
+              next to the amount instead of being something you remember later. */}
+          {debt && counterOptions.length > 0 && (
+            <div className="space-y-2">
+              <Label>
+                {counterFlow === "deposit"
+                  ? "¿A dónde entró la plata?"
+                  : "¿De dónde salió la plata?"}
+              </Label>
+              <Select value={counterAccount} onValueChange={(v) => v && setCounterAccount(v)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Ninguna">
+                    {(v) => {
+                      const a = counterOptions.find((x) => x.id.toString() === v);
+                      return a ? `${a.symbol} · ${a.name}` : "Ninguna (no la trackeo)";
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_ACCOUNT}>Ninguna (no la trackeo)</SelectItem>
+                  {counterOptions.map((a) => (
+                    <SelectItem key={a.id} value={a.id.toString()}>
+                      {a.symbol} — {formatMoney(a.current_price, a.currency)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {counterAsset ? (
+                  <>
+                    Se registra {counterFlow === "deposit" ? "un aporte en" : "un retiro de"}{" "}
+                    <span className="font-medium text-foreground">{counterAsset.symbol}</span> por el
+                    mismo monto. Tu patrimonio neto no se mueve: la plata cambia de lugar, no
+                    aparece ni desaparece.
+                  </>
+                ) : (
+                  <>
+                    Sin cuenta, la plata no{" "}
+                    {counterFlow === "deposit" ? "entra a ningún lado" : "sale de ningún lado"}: tu
+                    patrimonio neto va a {counterFlow === "deposit" ? "bajar" : "subir"}
+                    {previewNative() > 0 ? ` ${formatMoney(previewNative(), currency)}` : ""}.
+                  </>
+                )}
+              </p>
             </div>
           )}
 

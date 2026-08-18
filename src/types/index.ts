@@ -71,6 +71,7 @@ export interface Transaction {
   currency: "USD" | "ARS";
   date: string;
   notes: string | null;
+  link_id: string | null; // set on both legs of a paired operation (deleted together)
   created_at: string;
   asset_name?: string;
   asset_symbol?: string;

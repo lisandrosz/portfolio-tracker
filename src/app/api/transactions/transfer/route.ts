@@ -79,17 +79,19 @@ export async function POST(request: NextRequest) {
       from.currency === "ARS" ? (rate && rate > 0 ? Math.round(totalNative / rate) : 0) : totalNative;
     const note = data.notes || `Transferencia ${from.symbol} → ${to.symbol}`;
 
-    const insertSql = `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, fx_rate, currency, fee, date, notes)
-       VALUES (?, ?, 0, 0, ?, ?, ?, ?, 0, ?, ?)`;
+    // One id on both rows, so deleting either leg takes the pair with it.
+    const linkId = crypto.randomUUID();
+    const insertSql = `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, fx_rate, currency, fee, date, notes, link_id)
+       VALUES (?, ?, 0, 0, ?, ?, ?, ?, 0, ?, ?, ?)`;
 
     await db.batch([
       {
         sql: insertSql,
-        args: [from.id, "withdrawal", totalNative, totalUsd, rate, from.currency, data.date, note],
+        args: [from.id, "withdrawal", totalNative, totalUsd, rate, from.currency, data.date, note, linkId],
       },
       {
         sql: insertSql,
-        args: [to.id, "deposit", totalNative, totalUsd, rate, to.currency, data.date, note],
+        args: [to.id, "deposit", totalNative, totalUsd, rate, to.currency, data.date, note, linkId],
       },
     ]);
 

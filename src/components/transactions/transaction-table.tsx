@@ -33,9 +33,13 @@ export function TransactionTable({
   onRefresh,
   showAsset = true,
 }: TransactionTableProps) {
-  async function handleDelete(id: number) {
-    if (!confirm("Eliminar esta transacción?")) return;
-    await fetch(`/api/transactions/${id}`, { method: "DELETE" });
+  async function handleDelete(tx: Transaction) {
+    // Linked rows are two halves of one operation, so say so before taking both.
+    const msg = tx.link_id
+      ? "Esto es la mitad de una operación: se borran los dos movimientos. ¿Seguir?"
+      : "Eliminar esta transacción?";
+    if (!confirm(msg)) return;
+    await fetch(`/api/transactions/${tx.id}`, { method: "DELETE" });
     onRefresh();
   }
 
@@ -97,7 +101,7 @@ export function TransactionTable({
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => handleDelete(tx.id)}
+              onClick={() => handleDelete(tx)}
               className="text-muted-foreground hover:text-red-400"
             >
               <Trash2 size={16} />

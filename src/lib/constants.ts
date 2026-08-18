@@ -97,6 +97,36 @@ export const OUTFLOW_TYPES: TransactionType[] = ["sell", "withdrawal"];
 export const DEBT_UP_TYPE = "alta";
 export const DEBT_DOWN_TYPE = "pago";
 
+/**
+ * Which way money moves in the account backing a debt movement. Lending more or
+ * paying what you owe take money out of an account; being repaid or borrowing
+ * more bring it in.
+ *
+ * Recording only the debt side is what makes net worth jump: cancelling a
+ * receivable without banking the cash looks exactly like losing the money.
+ */
+export function debtCounterLegType(
+  debtType: string,
+  movement: string
+): "deposit" | "withdrawal" {
+  const inflow = isPayableType(debtType)
+    ? movement === DEBT_UP_TYPE
+    : movement === DEBT_DOWN_TYPE;
+  return inflow ? "deposit" : "withdrawal";
+}
+
+/** Note left on the account leg, so the movement reads on its own in the list. */
+export function debtCounterLegNote(
+  debtType: string,
+  movement: string,
+  name: string
+): string {
+  if (isPayableType(debtType)) {
+    return movement === DEBT_UP_TYPE ? `Préstamo recibido de ${name}` : `Pago a ${name}`;
+  }
+  return movement === DEBT_UP_TYPE ? `Préstamo a ${name}` : `Cobro de ${name}`;
+}
+
 export const PERIODS = {
   "1W": 7,
   "1M": 30,

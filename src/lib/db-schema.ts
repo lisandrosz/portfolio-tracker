@@ -61,6 +61,7 @@ export async function initializeSchema(db: Client) {
       fee         INTEGER NOT NULL DEFAULT 0,
       date        TEXT NOT NULL,
       notes       TEXT,
+      link_id     TEXT,
       created_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -145,6 +146,14 @@ export async function initializeSchema(db: Client) {
   // ARS per USD used to freeze total_usd. Nullable: NULL for USD assets, and for
   // pre-existing ARS rows whose rate was never recorded.
   await addColumn(db, hasTxCol("fx_rate"), "ALTER TABLE transactions ADD COLUMN fx_rate REAL");
+  // Ties the two legs of a single operation — a transfer, or a debt movement and
+  // the account it moved through — so deleting one can't leave the other behind.
+  await addColumn(db, hasTxCol("link_id"), "ALTER TABLE transactions ADD COLUMN link_id TEXT");
+  // Indexed after the migration: on an existing database the column only exists
+  // once the ALTER above has run.
+  await db.execute(
+    "CREATE INDEX IF NOT EXISTS idx_transactions_link_id ON transactions(link_id)"
+  );
 
   // Migration: add total_cost column to portfolio_snapshots
   const snapshotCols = (

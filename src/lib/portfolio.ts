@@ -1,5 +1,11 @@
 import type { Db } from "./db";
-import { INFLOW_TYPES, OUTFLOW_TYPES } from "./constants";
+import {
+  INFLOW_TYPES,
+  OUTFLOW_TYPES,
+  isBoxType,
+  debtCounterLegType,
+  debtCounterLegNote,
+} from "./constants";
 import type { Asset, InstallmentStats } from "@/types";
 
 type DB = Db;
@@ -189,6 +195,67 @@ export async function recalcDebtAsset(db: DB, assetId: number) {
       "UPDATE assets SET current_price = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
     )
     .run(debtBalance(txns), assetId);
+}
+
+/**
+ * Reject an account that can't back a debt movement honestly.
+ *
+ * Cross-currency is refused rather than converted at an invented rate — the same
+ * rule transfers follow. Load a withdrawal and a deposit by hand instead.
+ */
+export function counterAccountError(
+  counter: Asset | undefined,
+  debtCurrency: string
+): string | null {
+  if (!counter) return "Cuenta no encontrada";
+  if (!isBoxType(counter.type))
+    return "La contrapartida tiene que ser una cuenta de saldo (administrada, plazo fijo, efectivo)";
+  if (counter.currency !== debtCurrency)
+    return `${counter.symbol} está en ${counter.currency} y la deuda en ${debtCurrency}. Cargá el movimiento de la cuenta por separado.`;
+  return null;
+}
+
+/**
+ * Write the account side of a debt movement: the money that actually left or
+ * entered one of your balances, paired to the debt leg by `linkId` so deleting
+ * either one takes both.
+ *
+ * Both legs share the frozen USD value. They can: counterAccountError has
+ * already ruled out a currency mismatch, so the debt's amount IS the account's
+ * amount, and net worth doesn't move on a settlement — which is the whole point.
+ */
+export async function writeDebtCounterLeg(
+  db: DB,
+  opts: {
+    debt: Pick<Asset, "type" | "name">;
+    counter: Asset;
+    movement: string; // alta | pago
+    totalNative: number;
+    totalUsd: number;
+    rate: number | null;
+    date: string;
+    linkId: string;
+    notes?: string | null;
+  }
+) {
+  const legType = debtCounterLegType(opts.debt.type, opts.movement);
+  await db
+    .prepare(
+      `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, fx_rate, currency, fee, date, notes, link_id)
+       VALUES (?, ?, 0, 0, ?, ?, ?, ?, 0, ?, ?, ?)`
+    )
+    .run(
+      opts.counter.id,
+      legType,
+      opts.totalNative,
+      opts.totalUsd,
+      opts.rate,
+      opts.counter.currency,
+      opts.date,
+      opts.notes || debtCounterLegNote(opts.debt.type, opts.movement, opts.debt.name),
+      opts.linkId
+    );
+  await applyBoxFlow(db, opts.counter.id, legType === "deposit" ? opts.totalNative : -opts.totalNative);
 }
 
 /**
