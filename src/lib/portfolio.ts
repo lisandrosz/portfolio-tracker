@@ -112,19 +112,18 @@ type InstallmentAsset = Pick<
 /**
  * Derived figures for an installment asset (terreno).
  *
- * The asset is valued at `purchase_total_usd`, an appraisal FROZEN in USD at the
- * purchase-day rate, while the debt still owed is converted at TODAY's rate. That
- * split is deliberate: the land keeps its dollar value while an ARS-denominated
- * debt melts away with devaluation, which is the real economic gain.
- *
- * Everything already paid sums the per-transaction frozen `total_usd` — never a
- * fresh conversion — so the answer to "how much did this cost me in dollars"
+ * A pure record of what has been paid: ARS actually handed over, plus the USD
+ * each payment cost, summed from the per-transaction frozen `total_usd` — never
+ * a fresh conversion. So the answer to "how much did this cost me in dollars"
  * cannot drift after the fact.
+ *
+ * Nothing here is converted at today's rate, on purpose. The lot is priced in
+ * ARS but paid with dollars bought at the crypto rate, so any live conversion
+ * moved the numbers with the ARS/USD spread instead of with the deal.
  */
 export function installmentStats(
   asset: InstallmentAsset,
-  txns: TxRow[],
-  blue: number | null
+  txns: TxRow[]
 ): InstallmentStats {
   let paidNative = 0;
   let paidUsd = 0;
@@ -149,8 +148,6 @@ export function installmentStats(
   const totalPaidUsd = paidUsd + expensesUsd;
 
   return {
-    value: asset.purchase_total_usd,
-    liability: usdCents(remainingNative, "ARS", blue),
     paidNative,
     paidUsd,
     expensesNative,
@@ -158,7 +155,6 @@ export function installmentStats(
     totalPaidNative,
     totalPaidUsd,
     remainingNative,
-    remainingUsd: usdCents(remainingNative, "ARS", blue),
     installmentsPaid,
     installmentsTotal: asset.installments_total,
     progressPct: asset.purchase_total > 0 ? (paidNative / asset.purchase_total) * 100 : 0,

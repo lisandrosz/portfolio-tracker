@@ -7,6 +7,7 @@ import {
   isDebtType,
   isPayableType,
   isNonPerformingType,
+  isOffBalanceType,
 } from "@/lib/constants";
 import type { Asset } from "@/types";
 
@@ -58,12 +59,10 @@ export async function GET() {
       let installmentsPaid = 0;
 
       if (isInstallmentType(asset.type)) {
-        // Valued at its frozen USD appraisal, with the remaining ARS debt
-        // converted at today's rate — so devaluation melts the debt instead of
-        // shrinking the asset.
-        const stats = installmentStats(asset, grouped.get(asset.id) ?? [], blue);
-        currentValue = stats.value;
-        liability = stats.liability;
+        // Ledger only: no value and no debt, so the terreno can't move net worth
+        // in either direction. The row still carries what has been paid.
+        const stats = installmentStats(asset, grouped.get(asset.id) ?? []);
+        currentValue = 0;
         installmentsPaid = stats.installmentsPaid;
       } else if (isDebtType(asset.type)) {
         // current_price is the outstanding balance, derived from the ledger.
@@ -80,7 +79,10 @@ export async function GET() {
       const netInvested = isDebtType(asset.type) ? 0 : investedByAsset.get(asset.id) ?? 0;
       const grossInvested = isDebtType(asset.type) ? 0 : grossByAsset.get(asset.id) ?? 0;
       const equity = currentValue - liability;
-      const profitLoss = isDebtType(asset.type) ? 0 : equity - netInvested;
+      // Ledger-only holdings report no gain either: net_invested is what they
+      // have cost so far, and there is no value to measure it against.
+      const profitLoss =
+        isDebtType(asset.type) || isOffBalanceType(asset.type) ? 0 : equity - netInvested;
       // % return is on gross capital deployed, so it stays correct even after
       // withdrawing more than was put in (net invested <= 0).
       const profitLossPct = grossInvested > 0 ? (profitLoss / grossInvested) * 100 : 0;
@@ -99,9 +101,19 @@ export async function GET() {
       };
     })
     // Keep active holdings and positions that still carry realized P&L or debt.
-    .filter((a) => a.current_value > 0 || a.liability > 0 || Math.abs(a.net_invested) > 0);
+    // Ledger-only rows always stay: a terreno with no cuota paid yet is worth
+    // nothing by design, and it still has to be visible to load cuotas into.
+    .filter(
+      (a) =>
+        isOffBalanceType(a.type) ||
+        a.current_value > 0 ||
+        a.liability > 0 ||
+        Math.abs(a.net_invested) > 0
+    );
 
   for (const a of assetsWithValue) {
+    // Off the balance sheet entirely: no total, no allocation slice.
+    if (isOffBalanceType(a.type)) continue;
     totalValue += a.current_value;
     totalLiabilities += a.liability;
     allocationByType[a.type] = (allocationByType[a.type] || 0) + a.current_value;

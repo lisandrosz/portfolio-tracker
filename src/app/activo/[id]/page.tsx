@@ -115,11 +115,42 @@ export default function AssetDetailPage() {
                   className={asset.equity < 0 ? "text-red-400" : "text-emerald-400"}
                 />
               </div>
+            ) : installment ? (
+              // A ledger, not a holding: what you've paid and what's left, in
+              // pesos. No patrimonio, no deuda, no ganancia.
+              <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <Stat
+                  label="Cuotas pagadas"
+                  value={
+                    asset.installments_total > 0
+                      ? `${asset.installments_paid}/${asset.installments_total}`
+                      : String(asset.installments_paid)
+                  }
+                />
+                <Stat
+                  label="Pagado (ARS)"
+                  value={mask(formatMoney(asset.current_price, asset.currency), hidden)}
+                />
+                <Stat
+                  label="Resta pagar (ARS)"
+                  value={mask(
+                    formatMoney(
+                      Math.max(0, asset.purchase_total - asset.current_price),
+                      asset.currency
+                    ),
+                    hidden
+                  )}
+                />
+                <Stat
+                  label="Precio total (ARS)"
+                  value={mask(formatMoney(asset.purchase_total, asset.currency), hidden)}
+                />
+              </div>
             ) : (
             <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
               <Stat
-                label={installment ? "Patrimonio" : "Valor (USD)"}
-                value={mask(centsToUsd(installment ? asset.equity : asset.current_value), hidden)}
+                label="Valor (USD)"
+                value={mask(centsToUsd(asset.current_value), hidden)}
               />
               <Stat label="Invertido" value={mask(centsToUsd(asset.net_invested), hidden)} />
               <Stat
@@ -128,20 +159,12 @@ export default function AssetDetailPage() {
                 sub={formatPercent(asset.profit_loss_pct)}
                 className={asset.profit_loss >= 0 ? "text-emerald-400" : "text-red-400"}
               />
-              {installment ? (
-                <Stat
-                  label="Deuda"
-                  value={mask(centsToUsd(asset.liability), hidden)}
-                  className="text-red-400"
-                />
-              ) : (
-                !box && <Stat label="Cantidad" value={formatQuantity(asset.quantity)} />
-              )}
+              {!box && <Stat label="Cantidad" value={formatQuantity(asset.quantity)} />}
               <Stat
-                label={installment ? "Pagado (ARS)" : box ? "Saldo" : "Precio actual"}
+                label={box ? "Saldo" : "Precio actual"}
                 value={formatMoney(asset.current_price, asset.currency)}
               />
-              {!box && !installment && (
+              {!box && (
                 <Stat label="PPC" value={asset.avg_cost > 0 ? centsToUsd(asset.avg_cost) : "—"} />
               )}
             </div>
@@ -149,11 +172,7 @@ export default function AssetDetailPage() {
           </div>
 
           {installment && (
-            <InstallmentPanel
-              asset={asset}
-              transactions={txns}
-              blue={summary?.dolar_blue ?? null}
-            />
+            <InstallmentPanel asset={asset} transactions={txns} />
           )}
 
           {/* Counts */}

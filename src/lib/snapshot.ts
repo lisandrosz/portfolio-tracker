@@ -1,18 +1,18 @@
 import getDb from "./db";
 import { getCurrentBlue } from "./dolar-api";
-import { usdCents, netInvestedUsd, installmentStats, debtBalance } from "./portfolio";
+import { usdCents, netInvestedUsd, debtBalance } from "./portfolio";
 import {
-  isInstallmentType,
   isDebtType,
   isPayableType,
   isNonPerformingType,
+  isOffBalanceType,
 } from "./constants";
 import type { Asset } from "@/types";
 
 /**
  * Recompute the portfolio total (USD) and store today's snapshot.
  * total_value = gross holdings in USD; total_cost = net invested capital;
- * total_liabilities = debt still owed (installment assets).
+ * total_liabilities = debt still owed (por_pagar).
  */
 export async function autoSnapshot(blueArg?: number | null) {
   const db = await getDb();
@@ -45,17 +45,14 @@ export async function autoSnapshot(blueArg?: number | null) {
   const breakdown: Record<string, number> = {};
 
   for (const asset of assets) {
+    // Ledger-only holdings never reach the chart: they have no value to plot.
+    if (isOffBalanceType(asset.type)) continue;
+
     const txns = grouped.get(asset.id) ?? [];
     let value: number;
     let liability = 0;
 
-    if (isInstallmentType(asset.type)) {
-      // Frozen appraisal as the value; the ARS debt is tracked separately and
-      // converted at today's rate.
-      const stats = installmentStats(asset, txns, blue);
-      value = stats.value;
-      liability = stats.liability;
-    } else if (isDebtType(asset.type)) {
+    if (isDebtType(asset.type)) {
       const balance = debtBalance(txns);
       value = isPayableType(asset.type) ? 0 : balance;
       if (isPayableType(asset.type)) liability = balance;

@@ -49,12 +49,26 @@ export function isCashType(type: string): boolean {
 }
 
 /**
+ * Kept as a plain ledger, off the balance sheet: it records what you paid and
+ * nothing else. No value, no debt, no P&L, no allocation.
+ *
+ * A terreno en cuotas is priced in ARS but paid with dollars bought at the
+ * crypto rate, so any single conversion is wrong: valuing it swung net worth by
+ * the ARS/USD spread, not by anything that happened to the land.
+ */
+export function isOffBalanceType(type: string): boolean {
+  return isInstallmentType(type);
+}
+
+/**
  * Holdings that count toward net worth but not toward performance.
  * Cash has no return to measure; debts are USD against USD, so lending 500 and
  * being repaid 500 is a 0% "return" that would only dilute the real one.
+ * Ledger-only holdings don't reach net worth either — they're here so every
+ * accounting loop that filters on this predicate also skips them.
  */
 export function isNonPerformingType(type: string): boolean {
-  return isCashType(type) || isDebtType(type);
+  return isCashType(type) || isDebtType(type) || isOffBalanceType(type);
 }
 
 // Native currency of each asset type (used for blue conversion to USD).

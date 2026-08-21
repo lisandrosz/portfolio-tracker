@@ -9,14 +9,17 @@ import type { AssetWithValue, Transaction } from "@/types";
 interface Props {
   asset: AssetWithValue;
   transactions: Transaction[];
-  blue: number | null;
 }
 
 function rateLabel(rate: number) {
   return `$${rate.toLocaleString("es-AR", { maximumFractionDigits: 0 })}`;
 }
 
-/** One "ARS · USD" money pair, the shape this whole screen is built around. */
+/**
+ * One "ARS · USD" money pair, the shape this whole screen is built around.
+ * `usd` is optional: what's still owed is owed in pesos, and pricing it in
+ * dollars today would be a guess at the rate you'll pay it with.
+ */
 function Pair({
   label,
   native,
@@ -28,7 +31,7 @@ function Pair({
 }: {
   label: string;
   native: number;
-  usd: number;
+  usd?: number;
   currency: "USD" | "ARS";
   hidden: boolean;
   note?: string;
@@ -43,19 +46,23 @@ function Pair({
         <span className={strong ? "font-semibold" : "text-muted-foreground"}>
           {mask(formatMoney(native, currency), hidden)}
         </span>
-        <span className="text-muted-foreground/50">·</span>
-        <span className={strong ? "font-semibold text-primary" : "text-muted-foreground"}>
-          {mask(centsToUsd(usd), hidden)}
-        </span>
+        {usd != null && (
+          <>
+            <span className="text-muted-foreground/50">·</span>
+            <span className={strong ? "font-semibold text-primary" : "text-muted-foreground"}>
+              {mask(centsToUsd(usd), hidden)}
+            </span>
+          </>
+        )}
         {note && <span className="text-xs font-sans text-muted-foreground">{note}</span>}
       </span>
     </div>
   );
 }
 
-export function InstallmentPanel({ asset, transactions, blue }: Props) {
+export function InstallmentPanel({ asset, transactions }: Props) {
   const { hidden } = useBalance();
-  const s = installmentStats(asset, transactions, blue);
+  const s = installmentStats(asset, transactions);
   const currency = asset.currency;
   const expensesCount = transactions.filter((t) => t.type === "gasto").length;
 
@@ -121,26 +128,27 @@ export function InstallmentPanel({ asset, transactions, blue }: Props) {
         )}
       </div>
 
-      {/* What's left, and the deal itself */}
+      {/* What's left, and the deal itself — in pesos, which is how it's owed. */}
       <div className="space-y-2.5">
         <Pair
           label="Resta pagar"
           native={s.remainingNative}
-          usd={s.remainingUsd}
           currency={currency}
           hidden={hidden}
-          note="al blue de hoy"
           strong
         />
         <Pair
           label="Precio total pactado"
           native={asset.purchase_total}
-          usd={asset.purchase_total_usd}
           currency={currency}
           hidden={hidden}
-          note="tasación congelada"
         />
       </div>
+
+      <p className="border-t border-border/60 pt-3 text-xs text-muted-foreground">
+        Este seguimiento no suma ni resta al patrimonio, a la deuda ni a la ganancia. Es solo el
+        registro de las cuotas que vas pagando.
+      </p>
     </div>
   );
 }

@@ -25,7 +25,7 @@ export interface Asset {
 
 export interface AssetWithValue extends Asset {
   current_value: number; // USD cents
-  liability: number; // USD cents — debt still owed (installment assets; 0 for everything else)
+  liability: number; // USD cents — debt still owed (por_pagar; 0 for everything else)
   equity: number; // USD cents (current_value - liability)
   installments_paid: number; // count of cuotas paid (installment assets; 0 otherwise)
   net_invested: number; // USD cents (deposits/buys - withdrawals/sells)
@@ -36,14 +36,12 @@ export interface AssetWithValue extends Asset {
 }
 
 /**
- * Derived figures for an installment asset (terreno).
- * The USD amounts split into two kinds, and the difference is the whole point:
- * anything "paid" sums the per-transaction FROZEN total_usd, while anything
- * "remaining" is converted at today's rate.
+ * Derived figures for an installment asset (terreno): a record of what has been
+ * paid, nothing more. Every USD figure here is the sum of per-transaction FROZEN
+ * total_usd — what the payments actually cost — and nothing is ever converted at
+ * today's rate. What's still owed is quoted in ARS only, which is how it's owed.
  */
 export interface InstallmentStats {
-  value: number; // USD cents — frozen appraisal
-  liability: number; // USD cents — remaining debt at TODAY's rate
   paidNative: number; // ARS cents — cuotas only
   paidUsd: number; // USD cents — cuotas only, frozen
   expensesNative: number; // ARS cents — administrative expenses
@@ -51,7 +49,6 @@ export interface InstallmentStats {
   totalPaidNative: number; // ARS cents — cuotas + expenses
   totalPaidUsd: number; // USD cents — cuotas + expenses, frozen
   remainingNative: number; // ARS cents — agreed price - cuotas paid
-  remainingUsd: number; // USD cents — remaining at today's rate
   installmentsPaid: number; // count of cuota transactions
   installmentsTotal: number; // agreed cuota count (0 = not tracked)
   progressPct: number; // percentage paid, by money

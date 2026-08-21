@@ -1,14 +1,13 @@
 import getDb, { type SqlArg } from "./db";
 import { fetchDailyPrices } from "./coingecko";
 import { autoSnapshot } from "./snapshot";
-import { fetchBlueSeries, blueFromSeries } from "./dolar-api";
 import {
   INFLOW_TYPES,
   OUTFLOW_TYPES,
-  isInstallmentType,
   isDebtType,
   isPayableType,
   isNonPerformingType,
+  isOffBalanceType,
 } from "./constants";
 import type { Asset } from "@/types";
 
@@ -42,9 +41,7 @@ function enumerateDates(from: string, to: string): string[] {
 /**
  * Rebuild daily portfolio snapshots from transaction history.
  * - Crypto: real historical USD prices (CoinGecko daily series).
- * - Terreno: frozen USD appraisal from its purchase date on, with the ARS debt
- *   converted at each day's own blue — otherwise the chart would jump on the
- *   day the live snapshot takes over.
+ * - Terreno: skipped. It's a cuota ledger, not a holding — see isOffBalanceType.
  * - Debts (por_cobrar / por_pagar): outstanding USD balance replayed from altas
  *   and pagos; payables land in liabilities instead of value.
  * - FCI / box accounts (BingX, plazo, cash): value = net invested over time
@@ -92,10 +89,6 @@ export async function rebuildHistory(): Promise<{ days: number }> {
     }
   }
 
-  // One request for the whole daily blue series, to value each day's remaining
-  // debt at that day's rate.
-  const hasInstallments = assets.some((a) => isInstallmentType(a.type));
-  const blueSeries = hasInstallments ? await fetchBlueSeries() : null;
 
   const upsertSql = `INSERT INTO portfolio_snapshots (total_value, total_cost, total_liabilities, date, breakdown)
      VALUES (?, ?, ?, ?, ?)
@@ -116,17 +109,17 @@ export async function rebuildHistory(): Promise<{ days: number }> {
     const breakdown: Record<string, number> = {};
 
     for (const a of assets) {
+      if (isOffBalanceType(a.type)) continue;
+
       const ats = txByAsset.get(a.id) ?? [];
       let invested = 0;
       let qty = 0;
-      let paidNative = 0;
       let owed = 0;
       for (const t of ats) {
         if (t.date <= D) {
           if ((INFLOW_TYPES as string[]).includes(t.type)) invested += t.total_usd;
           else if ((OUTFLOW_TYPES as string[]).includes(t.type)) invested -= t.total_usd;
           qty += t.quantity;
-          if (t.type === "cuota") paidNative += t.total;
           if (t.type === "alta") owed += t.total_usd;
           else if (t.type === "pago") owed -= t.total_usd;
         }
@@ -138,17 +131,6 @@ export async function rebuildHistory(): Promise<{ days: number }> {
       if (a.type === "crypto") {
         const price = cryptoPrices.get(a.id)?.get(D);
         valueUsd = price != null ? Math.round(qty * price * 100) : invested;
-      } else if (isInstallmentType(a.type)) {
-        // Worth its frozen appraisal from the purchase date on; the debt shrinks
-        // both as cuotas are paid and as the peso loses value.
-        if (D < dateOnly(a.created_at)) {
-          valueUsd = 0;
-        } else {
-          valueUsd = a.purchase_total_usd;
-          const remaining = Math.max(0, a.purchase_total - paidNative);
-          const rate = blueSeries ? blueFromSeries(blueSeries, D) : null;
-          if (rate && rate > 0) liabilityUsd = Math.round(remaining / rate);
-        }
       } else if (isDebtType(a.type)) {
         // Already USD, so the balance replayed from the ledger is the value —
         // no rate conversion and no historical price to look up.

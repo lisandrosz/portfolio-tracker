@@ -11,6 +11,7 @@ import {
   isCashType,
   isInstallmentType,
   isDebtType,
+  isOffBalanceType,
   type AssetType,
 } from "@/lib/constants";
 import { centsToUsd, formatMoney, formatPercent, formatQuantity } from "@/lib/formatters";
@@ -83,8 +84,11 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
   // Value is net of debt, so the Total row reads as net worth.
   const totalValue = shown.reduce((s, a) => s + a.equity, 0);
   const totalLiabilities = shown.reduce((s, a) => s + a.liability, 0);
-  // Cash and debts have no return to measure, so they stay out of the P&L totals.
-  const invested = shown.filter((a) => !isCashType(a.type) && !isDebtType(a.type));
+  // Cash, debts and cuota ledgers have no return to measure, so they stay out of
+  // the P&L totals.
+  const invested = shown.filter(
+    (a) => !isCashType(a.type) && !isDebtType(a.type) && !isOffBalanceType(a.type)
+  );
   const totalInvested = invested.reduce((s, a) => s + a.net_invested, 0);
   const totalGain = invested.reduce((s, a) => s + a.profit_loss, 0);
   const totalGross = invested.reduce((s, a) => s + a.gross_invested, 0);
@@ -143,11 +147,23 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
             a.equity < 0 && "text-red-400"
           )}
         >
-          {mask(centsToUsd(a.equity), hidden)}
-          {a.liability > 0 && !isDebt && (
-            <div className="text-xs font-normal text-red-400/80">
-              deuda {mask(centsToUsd(a.liability), hidden)}
-            </div>
+          {inst ? (
+            // Off the balance sheet: show what it has cost, not a valuation.
+            <>
+              <span className="text-muted-foreground">
+                {mask(formatMoney(a.current_price, a.currency), hidden)}
+              </span>
+              <div className="text-xs font-normal text-muted-foreground/70">pagado</div>
+            </>
+          ) : (
+            <>
+              {mask(centsToUsd(a.equity), hidden)}
+              {a.liability > 0 && !isDebt && (
+                <div className="text-xs font-normal text-red-400/80">
+                  deuda {mask(centsToUsd(a.liability), hidden)}
+                </div>
+              )}
+            </>
           )}
         </td>
         <td
@@ -156,7 +172,7 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
             a.profit_loss >= 0 ? "text-emerald-400" : "text-red-400"
           )}
         >
-          {isDebt ? (
+          {isDebt || inst ? (
             <span className="text-muted-foreground">—</span>
           ) : (
             <>
