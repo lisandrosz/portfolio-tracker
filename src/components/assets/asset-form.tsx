@@ -162,19 +162,15 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
     setForm((prev) => ({
       ...prev,
       type: t,
-      // sensible default name for single-account types
+      // Only for types that are genuinely one account: cash, one per currency.
+      // Managed accounts are per exchange, and a BingX default merged the next
+      // exchange into the existing row, since assets dedupe on symbol+type.
       name:
         prev.name ||
-        (t === "managed"
-          ? "BingX Copytrading"
-          : t === "cash_usd"
-            ? "Efectivo USD"
-            : t === "cash_ars"
-              ? "Efectivo ARS"
-              : prev.name),
+        (t === "cash_usd" ? "Efectivo USD" : t === "cash_ars" ? "Efectivo ARS" : prev.name),
       symbol:
         prev.symbol ||
-        (t === "managed" ? "BINGX" : t === "cash_usd" ? "USD" : t === "cash_ars" ? "ARS" : prev.symbol),
+        (t === "cash_usd" ? "USD" : t === "cash_ars" ? "ARS" : prev.symbol),
     }));
   }
 
@@ -358,8 +354,8 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
 
           {type === "managed" && !isEdit && (
             <p className="text-xs text-muted-foreground bg-muted rounded-md p-2">
-              Cargá el saldo actual de tu cuenta. Después podés conectar la API de
-              BingX en Ajustes para que se actualice solo.
+              Cargá el saldo actual de tu cuenta. Si es la de BingX, podés conectar la
+              API en Ajustes para que se actualice sola; el resto se cargan a mano.
             </p>
           )}
 

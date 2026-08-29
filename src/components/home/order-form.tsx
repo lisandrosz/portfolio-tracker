@@ -194,18 +194,13 @@ export function OrderForm({ assets, onSaved }: Props) {
     setForm((p) => ({
       ...p,
       newType: t,
+      // Cash is one account per currency, so naming it is pure typing. A managed
+      // account is not: there can be one per exchange, and defaulting to BingX
+      // here merged a second exchange into it, since assets dedupe on symbol+type.
       name:
         p.name ||
-        (t === "managed"
-          ? "BingX Copytrading"
-          : t === "cash_usd"
-            ? "Efectivo USD"
-            : t === "cash_ars"
-              ? "Efectivo ARS"
-              : ""),
-      symbol:
-        p.symbol ||
-        (t === "managed" ? "BINGX" : t === "cash_usd" ? "USD" : t === "cash_ars" ? "ARS" : ""),
+        (t === "cash_usd" ? "Efectivo USD" : t === "cash_ars" ? "Efectivo ARS" : ""),
+      symbol: p.symbol || (t === "cash_usd" ? "USD" : t === "cash_ars" ? "ARS" : ""),
     }));
     setRateTouched(false);
   }

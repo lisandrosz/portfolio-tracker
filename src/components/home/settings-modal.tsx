@@ -11,12 +11,31 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CheckCircle2, DollarSign, Link2, Loader2, RefreshCw, History, LogOut } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatRate } from "@/lib/formatters";
+
+interface ManagedAccount {
+  id: number;
+  symbol: string;
+  name: string;
+}
 
 interface BingxStatus {
   configured: boolean;
   api_key_preview: string | null;
+  asset_id: number | "none" | null;
+  accounts: ManagedAccount[];
 }
+
+// Sentinel for "don't sync anything": BingX reports one equity, so when it is
+// split across strategy rows no single account owns the total.
+const NO_ACCOUNT = "none";
 
 interface UsdRate {
   rate: number | null;
@@ -42,6 +61,7 @@ export function SettingsModal({ open, onOpenChange, onChanged }: Props) {
   const [usdRate, setUsdRate] = useState<UsdRate | null>(null);
   const [rateInput, setRateInput] = useState("");
   const [savingRate, setSavingRate] = useState(false);
+  const [savingAccount, setSavingAccount] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   async function loadStatus() {
@@ -75,6 +95,26 @@ export function SettingsModal({ open, onOpenChange, onChanged }: Props) {
       loadRate();
     }
   }, [open]);
+
+  async function pickAccount(value: string) {
+    setSavingAccount(true);
+    setMessage(null);
+    try {
+      const asset_id = value === NO_ACCOUNT ? NO_ACCOUNT : Number(value);
+      const res = await fetch("/api/settings/bingx", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_id }),
+      });
+      if (!res.ok) {
+        setMessage({ type: "err", text: "No se pudo guardar la cuenta" });
+        return;
+      }
+      await loadStatus();
+    } finally {
+      setSavingAccount(false);
+    }
+  }
 
   async function saveRate() {
     const value = parseFloat(rateInput);
@@ -238,6 +278,41 @@ export function SettingsModal({ open, onOpenChange, onChanged }: Props) {
                 </>
               )}
             </div>
+
+            {status?.configured && (status.accounts?.length ?? 0) > 0 && (
+              <div className="space-y-2 pt-1">
+                <Label>Cuenta que sincroniza</Label>
+                <Select
+                  value={status.asset_id != null ? String(status.asset_id) : ""}
+                  onValueChange={(v) => v && pickAccount(v)}
+                  disabled={savingAccount}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Elegí una cuenta">
+                      {(v) => {
+                        if (v === NO_ACCOUNT) return "Ninguna (saldos manuales)";
+                        const a = status.accounts.find((x) => String(x.id) === v);
+                        return a ? `${a.symbol} · ${a.name}` : "Elegí una cuenta";
+                      }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {status.accounts.map((a) => (
+                      <SelectItem key={a.id} value={String(a.id)}>
+                        {a.symbol} — {a.name}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={NO_ACCOUNT}>Ninguna (saldos manuales)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  BingX informa un equity único, sin desglose por estrategia, así que solo puede
+                  escribirse en una cuenta. Las demás (Blofin, u otra estrategia) se actualizan a
+                  mano desde el lápiz de cada fila. Si repartiste BingX en varias filas, poné
+                  &ldquo;Ninguna&rdquo;: ninguna de ellas es dueña del total.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="border-t border-border pt-4 space-y-3">
