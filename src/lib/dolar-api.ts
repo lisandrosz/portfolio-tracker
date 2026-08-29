@@ -1,4 +1,5 @@
 import getDb from "./db";
+import { today } from "./dates";
 
 export interface DolarPrice {
   compra: number;
@@ -45,6 +46,63 @@ export async function getCurrentBlue(): Promise<number | null> {
   return cached ? Number(cached.value) : null;
 }
 
+const MANUAL_RATE_KEY = "usd_rate_manual";
+
+/**
+ * Hand-set ARS per USD, or null when the app follows the published blue.
+ *
+ * The blue is a quote for buying notes on the street; it is not necessarily the
+ * rate this portfolio actually transacts at (dollars bought against crypto run a
+ * couple of points off it). Converting pesos at a rate you never got quietly
+ * misstates every ARS holding, so the rate is something you can set.
+ */
+export async function getManualRate(): Promise<number | null> {
+  const db = await getDb();
+  const row = (await db
+    .prepare("SELECT value FROM settings WHERE key = ?")
+    .get(MANUAL_RATE_KEY)) as { value: string } | undefined;
+  const rate = row ? Number(row.value) : NaN;
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
+}
+
+/** Set the manual rate, or pass null to go back to following the blue. */
+export async function setManualRate(rate: number | null): Promise<void> {
+  const db = await getDb();
+  if (rate == null) {
+    await db.prepare("DELETE FROM settings WHERE key = ?").run(MANUAL_RATE_KEY);
+    return;
+  }
+  const value = String(rate);
+  await db
+    .prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?"
+    )
+    .run(MANUAL_RATE_KEY, value, value);
+}
+
+export interface UsdRate {
+  rate: number | null; // effective ARS per USD — what conversions actually use
+  blue: number | null; // published blue, kept for reference/comparison
+  manual: number | null; // the override, when one is set
+  source: "manual" | "blue";
+}
+
+/**
+ * The rate the app converts ARS at today, plus where it came from.
+ *
+ * The blue is fetched even when an override is set: the UI shows both so the
+ * override can be judged against the market instead of drifting unnoticed.
+ */
+export async function getUsdRate(): Promise<UsdRate> {
+  const [manual, blue] = await Promise.all([getManualRate(), getCurrentBlue()]);
+  return {
+    rate: manual ?? blue,
+    blue,
+    manual,
+    source: manual != null ? "manual" : "blue",
+  };
+}
+
 /**
  * Full daily blue series (venta) keyed by YYYY-MM-DD, in one request.
  * Gaps are forward-filled from the last quoted day, so weekends and holidays
@@ -89,19 +147,20 @@ export function blueFromSeries(series: Map<string, number>, date: string): numbe
 }
 
 /**
- * Blue (venta) for a specific date, best-effort via ArgentinaDatos.
+ * ARS per USD to freeze a transaction dated `date` at, best-effort.
  *
- * Order matters, and it differs for today vs the past. ArgentinaDatos publishes
- * with a lag, so the per-day endpoint 404s for today — for today (or a future
- * date) the live rate is the right answer, and reaching into the series would
- * freeze the payment at yesterday's close instead. For past dates the series is
- * the correct fallback, since the live rate has nothing to do with them.
+ * Today (or later) resolves to the effective rate, so a manual override applies
+ * to what you load now — that override IS "the rate I am getting today". Past
+ * dates always resolve to the blue actually published then: a rate typed today
+ * says nothing about a payment made in March, and a transaction's frozen USD is
+ * never recomputed, so guessing there would be permanent.
  *
- * This matters permanently: a transaction's frozen USD is never recomputed.
+ * Order matters for the past too. ArgentinaDatos publishes with a lag, so the
+ * per-day endpoint 404s for recent days; the series is the fallback, walked back
+ * to the last quoted day for weekends and holidays.
  */
-export async function getBlueForDate(date: string): Promise<number | null> {
-  const today = new Date().toISOString().split("T")[0];
-  if (date >= today) return getCurrentBlue();
+export async function getRateForDate(date: string): Promise<number | null> {
+  if (date >= today()) return (await getUsdRate()).rate;
 
   try {
     const [y, m, d] = date.split("-");
@@ -124,5 +183,7 @@ export async function getBlueForDate(date: string): Promise<number | null> {
     if (nearby) return nearby;
   }
 
+  // Nothing historical available. Stay on the published blue rather than the
+  // override: a hand-set rate describes today, not the day being backfilled.
   return getCurrentBlue();
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Eye, EyeOff, Settings, TrendingDown, TrendingUp } from "lucide-react";
-import { centsToUsd, formatPercent } from "@/lib/formatters";
+import { centsToUsd, formatPercent, formatRate } from "@/lib/formatters";
 import { useBalance, mask } from "./balance-context";
 import { cn } from "@/lib/utils";
 import type { PortfolioSummary } from "@/types";
@@ -45,6 +45,10 @@ export function PortfolioHeader({ summary, lastUpdated, onOpenSettings }: Props)
   const hasLiquidity = (summary?.liquidity ?? 0) > 0;
   const pnl = summary ? centsToUsd(summary.total_profit_loss) : "$0.00";
   const pct = summary ? formatPercent(summary.total_profit_loss_pct) : "+0.00%";
+  // The rate every peso holding is valued at. Shown because it moves the total
+  // as much as the holdings do, and it is not always the blue.
+  const usdRate = summary?.usd_rate ?? null;
+  const rateIsManual = summary?.usd_rate_source === "manual";
 
   return (
     <div className="relative flex flex-col items-center gap-5 pt-2">
@@ -91,7 +95,7 @@ export function PortfolioHeader({ summary, lastUpdated, onOpenSettings }: Props)
         <span className="font-medium opacity-80">{pct}</span>
       </div>
 
-      <div className="flex items-center gap-5 text-sm">
+      <div className="flex flex-wrap items-center justify-center gap-5 text-sm">
         <div className="flex flex-col items-center">
           <span className="text-xs text-muted-foreground">Invertido</span>
           <span className="font-semibold">{mask(invertido, hidden)}</span>
@@ -121,6 +125,31 @@ export function PortfolioHeader({ summary, lastUpdated, onOpenSettings }: Props)
               <span className="text-xs text-muted-foreground">Debo</span>
               <span className="font-semibold text-red-400">−{mask(deuda, hidden)}</span>
             </div>
+          </>
+        )}
+        {usdRate !== null && (
+          <>
+            <div className="h-7 w-px bg-border" />
+            <button
+              onClick={onOpenSettings}
+              className="flex flex-col items-center rounded-lg px-2 py-0.5 transition-colors hover:bg-accent"
+              title="Cambiar la cotización del dólar"
+            >
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                Dólar
+                <span
+                  className={cn(
+                    "rounded px-1 text-[10px] font-medium",
+                    rateIsManual
+                      ? "bg-primary/15 text-primary"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {rateIsManual ? "manual" : "blue"}
+                </span>
+              </span>
+              <span className="font-semibold">{formatRate(usdRate)}</span>
+            </button>
           </>
         )}
       </div>

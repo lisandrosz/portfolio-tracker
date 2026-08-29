@@ -10,11 +10,19 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckCircle2, Link2, Loader2, RefreshCw, History, LogOut } from "lucide-react";
+import { CheckCircle2, DollarSign, Link2, Loader2, RefreshCw, History, LogOut } from "lucide-react";
+import { formatRate } from "@/lib/formatters";
 
 interface BingxStatus {
   configured: boolean;
   api_key_preview: string | null;
+}
+
+interface UsdRate {
+  rate: number | null;
+  blue: number | null;
+  manual: number | null;
+  source: "manual" | "blue";
 }
 
 interface Props {
@@ -31,12 +39,22 @@ export function SettingsModal({ open, onOpenChange, onChanged }: Props) {
   const [syncing, setSyncing] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [authEnabled, setAuthEnabled] = useState(false);
+  const [usdRate, setUsdRate] = useState<UsdRate | null>(null);
+  const [rateInput, setRateInput] = useState("");
+  const [savingRate, setSavingRate] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   async function loadStatus() {
     const res = await fetch("/api/settings/bingx");
     const json = await res.json();
     setStatus(json.data);
+  }
+
+  async function loadRate() {
+    const res = await fetch("/api/settings/dolar");
+    const json = await res.json();
+    setUsdRate(json.data);
+    setRateInput(json.data?.manual ? String(json.data.manual) : "");
   }
 
   async function loadAuth() {
@@ -54,8 +72,48 @@ export function SettingsModal({ open, onOpenChange, onChanged }: Props) {
       setMessage(null);
       loadStatus();
       loadAuth();
+      loadRate();
     }
   }, [open]);
+
+  async function saveRate() {
+    const value = parseFloat(rateInput);
+    if (!(value > 0)) return;
+    setSavingRate(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/settings/dolar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rate: value }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "err", text: "No se pudo guardar la cotización" });
+        return;
+      }
+      setUsdRate(json.data);
+      setMessage({ type: "ok", text: `Cotización fijada en ${formatRate(value)}.` });
+      onChanged();
+    } finally {
+      setSavingRate(false);
+    }
+  }
+
+  async function clearRate() {
+    setSavingRate(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/settings/dolar", { method: "DELETE" });
+      const json = await res.json();
+      setUsdRate(json.data);
+      setRateInput("");
+      setMessage({ type: "ok", text: "Volviste a seguir el blue." });
+      onChanged();
+    } finally {
+      setSavingRate(false);
+    }
+  }
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -180,6 +238,67 @@ export function SettingsModal({ open, onOpenChange, onChanged }: Props) {
                 </>
               )}
             </div>
+          </div>
+
+          <div className="border-t border-border pt-4 space-y-3">
+            <h3 className="flex items-center gap-2 text-sm font-medium">
+              <DollarSign size={16} /> Cotización del dólar
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Con esta cotización se convierte a USD todo lo que tenés en pesos: FCI, plazo fijo
+              y efectivo ARS.{" "}
+              {usdRate?.blue != null && (
+                <>
+                  Blue publicado hoy:{" "}
+                  <span className="font-medium text-foreground">{formatRate(usdRate.blue)}</span>.
+                </>
+              )}
+            </p>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="number"
+                step="any"
+                min="0"
+                value={rateInput}
+                onChange={(e) => setRateInput(e.target.value)}
+                placeholder={usdRate?.blue != null ? String(usdRate.blue) : "1485"}
+                className="w-40"
+              />
+              <Button
+                size="sm"
+                onClick={saveRate}
+                disabled={savingRate || !(parseFloat(rateInput) > 0)}
+              >
+                {savingRate && <Loader2 size={14} className="mr-2 animate-spin" />}
+                Fijar cotización
+              </Button>
+              {usdRate?.source === "manual" && (
+                <Button size="sm" variant="ghost" onClick={clearRate} disabled={savingRate}>
+                  Volver al blue
+                </Button>
+              )}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              {usdRate?.source === "manual" ? (
+                <>
+                  Estás usando una cotización fija de{" "}
+                  <span className="font-medium text-foreground">
+                    {formatRate(usdRate.manual ?? 0)}
+                  </span>
+                  , no el blue. Se aplica también como cotización sugerida al cargar movimientos
+                  de hoy.
+                </>
+              ) : (
+                <>
+                  Ahora seguís el blue automáticamente. Fijala si comprás los dólares a otro
+                  precio (por ejemplo contra cripto) y el blue te desvía el total.
+                </>
+              )}{" "}
+              Los movimientos ya cargados no se recalculan: cada uno quedó congelado al tipo de
+              cambio de su fecha.
+            </p>
           </div>
 
           <div className="border-t border-border pt-4 space-y-2">

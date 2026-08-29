@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
 import { autoSnapshot } from "@/lib/snapshot";
-import { getBlueForDate } from "@/lib/dolar-api";
+import { getRateForDate } from "@/lib/dolar-api";
 import {
   recalcUnitAsset,
   applyBoxFlow,
@@ -192,7 +192,7 @@ export async function POST(request: NextRequest) {
     // A caller-supplied rate wins over the published blue.
     const rate =
       asset.currency === "ARS"
-        ? data.usd_rate ?? (await getBlueForDate(data.date))
+        ? data.usd_rate ?? (await getRateForDate(data.date))
         : null;
     const totalUsd =
       asset.currency === "ARS" ? (rate && rate > 0 ? Math.round(totalNative / rate) : 0) : totalNative;

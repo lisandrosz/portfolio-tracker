@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
 import { autoSnapshot } from "@/lib/snapshot";
 import { applyBoxFlow } from "@/lib/portfolio";
-import { getBlueForDate } from "@/lib/dolar-api";
+import { getRateForDate } from "@/lib/dolar-api";
 import { numberToCents, formatMoney } from "@/lib/formatters";
 import { isBoxType } from "@/lib/constants";
 import type { Asset } from "@/types";
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
     // each leg moves value and contributed capital together, and only matching
     // amounts leave both accounts' P&L untouched.
     const rate =
-      from.currency === "ARS" ? data.usd_rate ?? (await getBlueForDate(data.date)) : null;
+      from.currency === "ARS" ? data.usd_rate ?? (await getRateForDate(data.date)) : null;
     const totalUsd =
       from.currency === "ARS" ? (rate && rate > 0 ? Math.round(totalNative / rate) : 0) : totalNative;
     const note = data.notes || `Transferencia ${from.symbol} → ${to.symbol}`;

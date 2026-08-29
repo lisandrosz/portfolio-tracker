@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
 import { PERIODS } from "@/lib/constants";
 import type { Period } from "@/lib/constants";
+import { daysAgo } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -10,14 +11,12 @@ export async function GET(request: NextRequest) {
   const days = PERIODS[period] || 9999;
 
   const db = await getDb();
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
 
   const snapshots = await db
     .prepare(
       "SELECT * FROM portfolio_snapshots WHERE date >= ? ORDER BY date ASC"
     )
-    .all(cutoff.toISOString().split("T")[0]);
+    .all(daysAgo(days));
 
   return Response.json({ data: snapshots });
 }

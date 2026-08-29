@@ -84,7 +84,9 @@ export interface PortfolioSummary {
   payables: number; // USD cents — money I owe (part of total_liabilities)
   total_profit_loss: number; // USD cents — investments only
   total_profit_loss_pct: number; // % on invested capital (excludes cash)
-  dolar_blue: number | null;
+  dolar_blue: number | null; // published blue, for reference
+  usd_rate: number | null; // ARS per USD actually used to convert
+  usd_rate_source: "manual" | "blue";
   assets: AssetWithValue[];
   allocation_by_type: Record<string, number>;
 }

@@ -9,6 +9,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { today } from "@/lib/dates";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -59,7 +60,7 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
     installments_total: asset?.installments_total ? asset.installments_total.toString() : "",
     date: asset?.created_at
       ? asset.created_at.split("T")[0]
-      : new Date().toISOString().split("T")[0],
+      : today(),
     notes: asset?.notes || "",
   });
 

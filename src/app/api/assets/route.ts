@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
 import { autoSnapshot } from "@/lib/snapshot";
-import { getBlueForDate } from "@/lib/dolar-api";
+import { getRateForDate } from "@/lib/dolar-api";
+import { today } from "@/lib/dates";
 import {
   recalcUnitAsset,
   applyBoxFlow,
@@ -70,12 +71,12 @@ export async function POST(request: NextRequest) {
     const debt = isDebtType(type);
     const priceCents = numberToCents(data.price || 0);
     const purchaseTotalCents = numberToCents(data.purchase_total || 0);
-    const date = data.date || new Date().toISOString().split("T")[0];
+    const date = data.date || today();
 
     // Freeze USD at the purchase/opening date. A caller-supplied rate wins over
     // the published blue, and the result is stored, never recomputed later.
     const rate =
-      currency === "ARS" ? data.usd_rate ?? (await getBlueForDate(date)) : null;
+      currency === "ARS" ? data.usd_rate ?? (await getRateForDate(date)) : null;
     const toUsd = (native: number) =>
       currency === "ARS" ? (rate && rate > 0 ? Math.round(native / rate) : 0) : native;
 

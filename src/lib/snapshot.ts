@@ -1,5 +1,6 @@
 import getDb from "./db";
-import { getCurrentBlue } from "./dolar-api";
+import { today } from "./dates";
+import { getUsdRate } from "./dolar-api";
 import { usdCents, netInvestedUsd, debtBalance } from "./portfolio";
 import {
   isDebtType,
@@ -16,7 +17,7 @@ import type { Asset } from "@/types";
  */
 export async function autoSnapshot(blueArg?: number | null) {
   const db = await getDb();
-  const blue = blueArg ?? (await getCurrentBlue());
+  const blue = blueArg ?? (await getUsdRate()).rate;
   const assets = (await db.prepare("SELECT * FROM assets").all()) as Asset[];
 
   const txns = (await db
@@ -79,7 +80,7 @@ export async function autoSnapshot(blueArg?: number | null) {
 
   if (totalValue === 0 && totalCost === 0 && totalLiabilities === 0) return;
 
-  const today = new Date().toISOString().split("T")[0];
+  const day = today();
 
   await db
     .prepare(
@@ -91,7 +92,7 @@ export async function autoSnapshot(blueArg?: number | null) {
       totalValue,
       totalCost,
       totalLiabilities,
-      today,
+      day,
       JSON.stringify(breakdown),
       totalValue,
       totalCost,

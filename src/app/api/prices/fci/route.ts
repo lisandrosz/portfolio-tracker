@@ -1,4 +1,5 @@
 import getDb, { type SqlArg } from "@/lib/db";
+import { today } from "@/lib/dates";
 import { fetchAllFunds } from "@/lib/fci";
 import { autoSnapshot } from "@/lib/snapshot";
 import { numberToCents } from "@/lib/formatters";
@@ -19,7 +20,7 @@ export async function POST() {
   }
   const byName = new Map(funds.map((f) => [f.fondo, f.vcp]));
 
-  const today = new Date().toISOString().split("T")[0];
+  const day = today();
   const updateSql =
     "UPDATE assets SET current_price = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?";
   const historySql =
@@ -32,7 +33,7 @@ export async function POST() {
     if (vcp) {
       const cents = numberToCents(vcp); // ARS cents per cuotaparte
       stmts.push({ sql: updateSql, args: [cents, asset.id] });
-      stmts.push({ sql: historySql, args: [asset.id, cents, today, cents] });
+      stmts.push({ sql: historySql, args: [asset.id, cents, day, cents] });
       updated++;
     }
   }

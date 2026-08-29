@@ -1,4 +1,5 @@
 import getDb, { type SqlArg } from "./db";
+import { today } from "./dates";
 import { fetchDailyPrices } from "./coingecko";
 import { autoSnapshot } from "./snapshot";
 import {
@@ -63,9 +64,16 @@ export async function rebuildHistory(): Promise<{ days: number }> {
   }
 
   const firstDate = dateOnly(txns[0].date);
-  const today = new Date().toISOString().split("T")[0];
-  const dates = enumerateDates(firstDate, today);
+  const lastDate = today();
+  const dates = enumerateDates(firstDate, lastDate);
   if (dates.length === 0) return { days: 0 };
+
+  // Drop anything dated past today. The rebuild only upserts the days it walks,
+  // so a snapshot stamped with a date that never arrived would otherwise sit on
+  // the chart untouched until the calendar caught up with it. Earlier versions
+  // resolved "today" in UTC, which produced exactly that between 21:00 and
+  // midnight local.
+  await db.prepare("DELETE FROM portfolio_snapshots WHERE date > ?").run(lastDate);
 
   // Group transactions by asset (already date-sorted).
   const txByAsset = new Map<number, Tx[]>();

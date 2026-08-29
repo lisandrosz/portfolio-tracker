@@ -1,4 +1,5 @@
 import getDb, { type SqlArg } from "@/lib/db";
+import { today } from "@/lib/dates";
 import { fetchCryptoPrices } from "@/lib/coingecko";
 import { autoSnapshot } from "@/lib/snapshot";
 import { numberToCents } from "@/lib/formatters";
@@ -40,7 +41,7 @@ export async function POST() {
     );
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const day = today();
   let updated = 0;
 
   const updateSql =
@@ -55,7 +56,7 @@ export async function POST() {
       const priceCents = numberToCents(priceData.usd);
       const change = priceData.usd_24h_change ?? null;
       stmts.push({ sql: updateSql, args: [priceCents, change, asset.id] });
-      stmts.push({ sql: historySql, args: [asset.id, priceCents, today, priceCents] });
+      stmts.push({ sql: historySql, args: [asset.id, priceCents, day, priceCents] });
       updated++;
     }
   }

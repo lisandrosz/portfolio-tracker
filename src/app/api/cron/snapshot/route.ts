@@ -1,4 +1,5 @@
 import getDb, { type SqlArg } from "@/lib/db";
+import { today } from "@/lib/dates";
 import { fetchCryptoPrices } from "@/lib/coingecko";
 import { fetchAllFunds } from "@/lib/fci";
 import { autoSnapshot } from "@/lib/snapshot";
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
   }
 
   const db = await getDb();
-  const today = new Date().toISOString().split("T")[0];
+  const day = today();
   const updateSql =
     "UPDATE assets SET current_price = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?";
   const historySql =
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
               sql: "UPDATE assets SET current_price = ?, change_24h = ?, price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
               args: [c, pd.usd_24h_change ?? null, a.id],
             });
-            stmts.push({ sql: historySql, args: [a.id, c, today, c] });
+            stmts.push({ sql: historySql, args: [a.id, c, day, c] });
           }
         }
         await db.batch(stmts);
@@ -74,7 +75,7 @@ export async function GET(request: Request) {
         if (vcp) {
           const c = numberToCents(vcp);
           stmts.push({ sql: updateSql, args: [c, a.id] });
-          stmts.push({ sql: historySql, args: [a.id, c, today, c] });
+          stmts.push({ sql: historySql, args: [a.id, c, day, c] });
         }
       }
       await db.batch(stmts);
@@ -86,5 +87,5 @@ export async function GET(request: Request) {
   // 3) Store today's portfolio snapshot with the refreshed values.
   await autoSnapshot();
 
-  return Response.json({ data: { ok: true, date: today } });
+  return Response.json({ data: { ok: true, date: day } });
 }

@@ -9,6 +9,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { today } from "@/lib/dates";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -44,8 +45,6 @@ interface Props {
   onSaved: () => void;
 }
 
-const todayStr = () => new Date().toISOString().split("T")[0];
-
 export function OrderForm({ assets, onSaved }: Props) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -73,7 +72,7 @@ export function OrderForm({ assets, onSaved }: Props) {
     installments_total: "",
     usd_rate: "",
     fee: "0",
-    date: todayStr(),
+    date: today(),
     notes: "",
   });
 
@@ -158,7 +157,7 @@ export function OrderForm({ assets, onSaved }: Props) {
       installments_total: "",
       usd_rate: "",
       fee: "0",
-      date: todayStr(),
+      date: today(),
       notes: "",
     });
   }
@@ -958,7 +957,8 @@ export function OrderForm({ assets, onSaved }: Props) {
             )}
           </div>
 
-          {/* Editable exchange rate — suggested from the date, frozen on save. */}
+          {/* Editable exchange rate. Suggested from the date: the rate you set in
+              Ajustes for today, the published blue for a past date. Frozen on save. */}
           {needsRate && (
             <div className="space-y-2 rounded-lg border border-primary/25 bg-primary/5 p-3">
               <div className="flex items-center justify-between">
@@ -975,7 +975,7 @@ export function OrderForm({ assets, onSaved }: Props) {
                     }}
                     className="text-xs font-medium text-primary hover:underline"
                   >
-                    Usar blue del día
+                    Usar la del día
                   </button>
                 )}
               </div>
@@ -1007,8 +1007,8 @@ export function OrderForm({ assets, onSaved }: Props) {
                   </>
                 ) : (
                   <>
-                    Sugerida según el blue de la fecha elegida. Editala si conseguiste los dólares a
-                    otro precio.
+                    Sugerida según la cotización de la fecha elegida. Editala si conseguiste los
+                    dólares a otro precio.
                   </>
                 )}
               </p>

@@ -27,6 +27,15 @@ export function numberToCents(value: number): number {
   return Math.round(value * 100);
 }
 
+/** ARS per USD as a plain rate (not cents): 1485.5 -> "$ 1.486". */
+export function formatRate(rate: number): string {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(rate);
+}
+
 export function formatPercent(value: number): string {
   const sign = value >= 0 ? "+" : "";
   return `${sign}${value.toFixed(2)}%`;

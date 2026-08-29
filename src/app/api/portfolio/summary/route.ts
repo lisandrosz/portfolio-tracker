@@ -1,5 +1,5 @@
 import getDb from "@/lib/db";
-import { getCurrentBlue } from "@/lib/dolar-api";
+import { getUsdRate } from "@/lib/dolar-api";
 import { usdCents, netInvestedUsd, grossInvestedUsd, installmentStats } from "@/lib/portfolio";
 import {
   isCashType,
@@ -15,7 +15,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const db = await getDb();
-  const blue = await getCurrentBlue();
+  // `blue` is whatever ARS converts at right now — the published blue, or the
+  // manual override when one is set.
+  const { rate: blue, blue: publishedBlue, source: rateSource } = await getUsdRate();
 
   const assets = (await db.prepare("SELECT * FROM assets").all()) as Asset[];
 
@@ -150,7 +152,9 @@ export async function GET() {
       payables,
       total_profit_loss: totalProfitLoss,
       total_profit_loss_pct: totalProfitLossPct,
-      dolar_blue: blue,
+      dolar_blue: publishedBlue,
+      usd_rate: blue,
+      usd_rate_source: rateSource,
       assets: assetsWithValue.sort((a, b) => b.current_value - a.current_value),
       allocation_by_type: allocationByType,
     },
