@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
 import { autoSnapshot } from "@/lib/snapshot";
-import { isInstallmentType, isDebtType } from "@/lib/constants";
+import { isInstallmentType, isDebtType, isBtcDenominated } from "@/lib/constants";
 import { z } from "zod";
 
 const updateAssetSchema = z.object({
@@ -24,6 +24,8 @@ const updateAssetSchema = z.object({
   fund_name: z.string().nullable().optional(),
   group_name: z.string().nullable().optional(), // roll-up label
   current_price: z.number().optional(), // native cents (manual balance / valuation for box assets)
+  // BTC accounts only: the balance is a bitcoin amount, not cents.
+  quantity: z.number().min(0).optional(),
   // Installment assets. `current_price` is deliberately not editable for them:
   // it is derived from the cuota ledger and a manual write would desync it.
   purchase_total: z.number().optional(), // native cents — agreed price
@@ -59,9 +61,26 @@ export async function PUT(
 
     const db = await getDb();
     const existing = (await db.prepare("SELECT * FROM assets WHERE id = ?").get(id)) as
-      | { type: string }
+      | { type: string; currency: string }
       | undefined;
     if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
+
+    const btc = isBtcDenominated(existing.currency);
+    // On a BTC account current_price is the market price of a bitcoin, refreshed
+    // from CoinGecko every poll. Accepting a manual write would look like it
+    // worked and be gone within the minute; the balance is `quantity`.
+    if (data.current_price !== undefined && btc) {
+      return Response.json(
+        { error: "El saldo de una cuenta en BTC se edita en bitcoin, no en dólares" },
+        { status: 400 }
+      );
+    }
+    if (data.quantity !== undefined && !btc) {
+      return Response.json(
+        { error: "Solo las cuentas en BTC llevan el saldo en cantidad" },
+        { status: 400 }
+      );
+    }
 
     if (data.current_price !== undefined && isInstallmentType(existing.type)) {
       return Response.json(

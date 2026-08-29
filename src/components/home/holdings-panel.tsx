@@ -13,8 +13,15 @@ import {
   isDebtType,
   isOffBalanceType,
   type AssetType,
+  isBtcDenominated,
 } from "@/lib/constants";
-import { centsToUsd, formatMoney, formatPercent, formatQuantity } from "@/lib/formatters";
+import {
+  centsToUsd,
+  formatBtc,
+  formatMoney,
+  formatPercent,
+  formatQuantity,
+} from "@/lib/formatters";
 import { AssetForm } from "@/components/assets/asset-form";
 import { OrderForm } from "./order-form";
 import { useBalance, mask } from "./balance-context";
@@ -105,6 +112,9 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
     const box = isBoxType(a.type);
     const inst = isInstallmentType(a.type);
     const isDebt = isDebtType(a.type);
+    // A BTC account is a box whose balance is a quantity, so it fills the Precio
+    // and Cantidad columns a dollar account leaves empty.
+    const btc = isBtcDenominated(a.currency);
     return (
       <tr
         key={a.id}
@@ -125,9 +135,11 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
         <td className="px-4 py-3 text-right font-mono text-muted-foreground">
           {inst
             ? formatMoney(a.purchase_total, a.currency)
-            : box || isDebt
-              ? "—"
-              : formatMoney(a.current_price, a.currency)}
+            : btc
+              ? centsToUsd(a.current_price)
+              : box || isDebt
+                ? "—"
+                : formatMoney(a.current_price, a.currency)}
         </td>
         <td className="px-4 py-3 text-right font-mono text-muted-foreground">
           {box || inst || isDebt || a.avg_cost <= 0 ? "—" : centsToUsd(a.avg_cost)}
@@ -137,9 +149,11 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
             ? a.installments_total > 0
               ? `${a.installments_paid}/${a.installments_total}`
               : "—"
-            : box || isDebt
-              ? "—"
-              : formatQuantity(a.quantity)}
+            : btc
+              ? formatBtc(a.quantity)
+              : box || isDebt
+                ? "—"
+                : formatQuantity(a.quantity)}
         </td>
         <td
           className={cn(

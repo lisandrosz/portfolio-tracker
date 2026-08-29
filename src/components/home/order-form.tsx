@@ -30,9 +30,13 @@ import {
   isPayableType,
   debtCounterLegType,
   type AssetType,
+  isBtcDenominated,
+  MANAGED_CURRENCIES,
+  BTC_COINGECKO_ID,
+  type Currency,
 } from "@/lib/constants";
 import { Plus, Loader2, Lock } from "lucide-react";
-import { centsToUsd, formatMoney, numberToCents } from "@/lib/formatters";
+import { centsToUsd, formatBtc, formatMoney, numberToCents } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import type { Asset } from "@/types";
 
@@ -60,6 +64,7 @@ export function OrderForm({ assets, onSaved }: Props) {
   const [counterAccount, setCounterAccount] = useState(NO_ACCOUNT);
   const [form, setForm] = useState({
     newType: "crypto" as AssetType,
+    newCurrency: "USD" as Currency,
     symbol: "",
     name: "",
     group_name: "",
@@ -71,6 +76,7 @@ export function OrderForm({ assets, onSaved }: Props) {
     purchase_total: "",
     installments_total: "",
     usd_rate: "",
+    btc_price: "",
     fee: "0",
     date: today(),
     notes: "",
@@ -98,8 +104,23 @@ export function OrderForm({ assets, onSaved }: Props) {
   const payable = isPayableType(assetType);
   // Debts and boxes are both "one amount moves the balance" forms.
   const amountForm = box || installment || debt;
-  const currency = ASSET_CURRENCY[assetType];
+  // An existing asset carries its own currency: a managed account can be opened
+  // in BTC, so the type's default is only right for something being created.
+  const currency: Currency = isNew
+    ? assetType === "managed"
+      ? form.newCurrency
+      : ASSET_CURRENCY[assetType]
+    : (selected?.currency ?? ASSET_CURRENCY[assetType]);
   const needsRate = currency === "ARS";
+  const btcAccount = isBtcDenominated(currency);
+  const btcPrice = parseFloat(form.btc_price) || 0;
+
+  /** A box account's balance in its own unit. */
+  function balanceLabel(a: Asset) {
+    return isBtcDenominated(a.currency)
+      ? formatBtc(a.quantity)
+      : formatMoney(a.current_price, a.currency);
+  }
 
   function assetLabel(v: string) {
     if (!v) return "Elegí o creá un activo";
@@ -128,11 +149,28 @@ export function OrderForm({ assets, onSaved }: Props) {
     }
   }, []);
 
-  // Suggest the rate as soon as an ARS asset is in play.
+  const fetchBtcPrice = useCallback(async (date: string) => {
+    if (!date) return;
+    setFetchingRate(true);
+    try {
+      const res = await fetch(
+        `/api/prices/history?coin_id=${BTC_COINGECKO_ID}&date=${date}`
+      );
+      const json = await res.json();
+      if (json.data?.price) setForm((p) => ({ ...p, btc_price: json.data.price.toString() }));
+    } finally {
+      setFetchingRate(false);
+    }
+  }, []);
+
+  // Suggest the rate as soon as an ARS or BTC holding is in play. Both answer the
+  // same question — what a unit of the account's currency was worth that day.
   useEffect(() => {
-    if (open && needsRate && !rateTouched) fetchRate(form.date);
+    if (!open || rateTouched) return;
+    if (needsRate) fetchRate(form.date);
+    else if (btcAccount) fetchBtcPrice(form.date);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, needsRate, assetChoice, form.newType]);
+  }, [open, needsRate, btcAccount, assetChoice, form.newType, form.newCurrency]);
 
   function reset() {
     setMode("order");
@@ -145,6 +183,7 @@ export function OrderForm({ assets, onSaved }: Props) {
     setRateTouched(false);
     setForm({
       newType: "crypto",
+      newCurrency: "USD",
       symbol: "",
       name: "",
       group_name: "",
@@ -156,6 +195,7 @@ export function OrderForm({ assets, onSaved }: Props) {
       purchase_total: "",
       installments_total: "",
       usd_rate: "",
+      btc_price: "",
       fee: "0",
       date: today(),
       notes: "",
@@ -235,6 +275,9 @@ export function OrderForm({ assets, onSaved }: Props) {
     if (needsRate) {
       setRateTouched(false);
       fetchRate(date);
+    } else if (btcAccount) {
+      setRateTouched(false);
+      fetchBtcPrice(date);
     }
   }
 
@@ -277,7 +320,11 @@ export function OrderForm({ assets, onSaved }: Props) {
     return Math.round(qty * numberToCents(parseFloat(form.price) || 0));
   }
 
-  const previewUsd = rate > 0 ? Math.round(previewNative() / rate) : 0;
+  const previewUsd = btcAccount
+    ? Math.round((parseFloat(form.amount) || 0) * numberToCents(btcPrice))
+    : rate > 0
+      ? Math.round(previewNative() / rate)
+      : 0;
 
   // Remaining debt, for cuota validation and the "cuota sugerida" shortcut.
   const remaining =
@@ -312,6 +359,9 @@ export function OrderForm({ assets, onSaved }: Props) {
           notes: form.notes || null,
         };
         if (fromAsset?.currency === "ARS" && rate > 0) body.usd_rate = rate;
+        if (fromAsset && isBtcDenominated(fromAsset.currency) && btcPrice > 0) {
+          body.btc_price = btcPrice;
+        }
 
         const res = await fetch("/api/transactions/transfer", {
           method: "POST",
@@ -356,6 +406,8 @@ export function OrderForm({ assets, onSaved }: Props) {
           body.installments_total = parseInt(form.installments_total) || 0;
         }
         if (needsRate && rate > 0) body.usd_rate = rate;
+        if (assetType === "managed") body.currency = form.newCurrency;
+        if (btcAccount && btcPrice > 0) body.btc_price = btcPrice;
         // The account the lent/borrowed money moved through, if it was tracked.
         if (debt && counterAsset) body.counter_asset_id = counterAsset.id;
 
@@ -382,6 +434,7 @@ export function OrderForm({ assets, onSaved }: Props) {
           body.price = parseFloat(form.price) || 0;
         }
         if (needsRate && rate > 0) body.usd_rate = rate;
+        if (btcAccount && btcPrice > 0) body.btc_price = btcPrice;
         if (debt && counterAsset) body.counter_asset_id = counterAsset.id;
 
         const res = await fetch("/api/transactions", {
@@ -482,7 +535,7 @@ export function OrderForm({ assets, onSaved }: Props) {
                 <SelectContent>
                   {boxAssets.map((a) => (
                     <SelectItem key={a.id} value={a.id.toString()}>
-                      {a.symbol} — {formatMoney(a.current_price, a.currency)}
+                      {a.symbol} — {balanceLabel(a)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -505,7 +558,7 @@ export function OrderForm({ assets, onSaved }: Props) {
                     .filter((a) => a.id.toString() !== transferFrom)
                     .map((a) => (
                       <SelectItem key={a.id} value={a.id.toString()}>
-                        {a.symbol} — {formatMoney(a.current_price, a.currency)}
+                        {a.symbol} — {balanceLabel(a)}
                       </SelectItem>
                     ))}
                 </SelectContent>
@@ -519,7 +572,12 @@ export function OrderForm({ assets, onSaved }: Props) {
                   <button
                     type="button"
                     onClick={() =>
-                      setForm({ ...form, amount: (fromAsset.current_price / 100).toString() })
+                      setForm({
+                        ...form,
+                        amount: isBtcDenominated(fromAsset.currency)
+                          ? fromAsset.quantity.toString()
+                          : (fromAsset.current_price / 100).toString(),
+                      })
                     }
                     className="text-xs font-medium text-primary hover:underline"
                   >
@@ -537,7 +595,7 @@ export function OrderForm({ assets, onSaved }: Props) {
               />
               {fromAsset && (
                 <p className="text-xs text-muted-foreground">
-                  Disponible: {formatMoney(fromAsset.current_price, fromAsset.currency)}
+                  Disponible: {balanceLabel(fromAsset)}
                 </p>
               )}
             </div>
@@ -700,6 +758,36 @@ export function OrderForm({ assets, onSaved }: Props) {
                 </div>
               )}
 
+              {form.newType === "managed" && (
+                <div className="space-y-2">
+                  <Label>Moneda de la cuenta</Label>
+                  <Select
+                    value={form.newCurrency}
+                    onValueChange={(v) =>
+                      v && setForm((p) => ({ ...p, newCurrency: v as Currency }))
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue>
+                        {(v) => (v === "BTC" ? "BTC (bitcoin)" : "USD (dólares)")}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MANAGED_CURRENCIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c === "BTC" ? "BTC (bitcoin)" : "USD (dólares)"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Elegí BTC solo si el saldo de la cuenta está en bitcoin (copytrading con
+                    margen en BTC). Si el margen es USDT, dejalo en USD: el valor no sigue al
+                    precio de BTC, y marcarlo así te contaría exposición que no tenés.
+                  </p>
+                </div>
+              )}
+
               {/* Grouping earns its place on managed accounts: one BingX account
                   holding several copied strategies. */}
               {form.newType === "managed" && (
@@ -794,7 +882,12 @@ export function OrderForm({ assets, onSaved }: Props) {
                   <button
                     type="button"
                     onClick={() =>
-                      setForm({ ...form, amount: (selected.current_price / 100).toString() })
+                      setForm({
+                        ...form,
+                        amount: btcAccount
+                          ? selected.quantity.toString()
+                          : (selected.current_price / 100).toString(),
+                      })
                     }
                     className="text-xs font-medium text-primary hover:underline"
                   >
@@ -827,7 +920,7 @@ export function OrderForm({ assets, onSaved }: Props) {
                 step="any"
                 value={form.amount}
                 onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                placeholder="1000"
+                placeholder={btcAccount ? "0.05" : "1000"}
                 required
               />
               {!isNew && orderType === "withdrawal" && selected && (
@@ -909,7 +1002,7 @@ export function OrderForm({ assets, onSaved }: Props) {
                   <SelectItem value={NO_ACCOUNT}>Ninguna (no la trackeo)</SelectItem>
                   {counterOptions.map((a) => (
                     <SelectItem key={a.id} value={a.id.toString()}>
-                      {a.symbol} — {formatMoney(a.current_price, a.currency)}
+                      {a.symbol} — {balanceLabel(a)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1004,6 +1097,63 @@ export function OrderForm({ assets, onSaved }: Props) {
                   <>
                     Sugerida según la cotización de la fecha elegida. Editala si conseguiste los
                     dólares a otro precio.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+
+          {/* Same idea as the ARS rate: what one unit of the account's currency was
+              worth on the date, frozen on save. */}
+          {btcAccount && (
+            <div className="space-y-2 rounded-lg border border-primary/25 bg-primary/5 p-3">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-1.5">
+                  <Lock size={12} className="text-primary" />
+                  Precio de BTC (USD)
+                </Label>
+                {rateTouched && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRateTouched(false);
+                      fetchBtcPrice(form.date);
+                    }}
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    Usar el del día
+                  </button>
+                )}
+              </div>
+              <div className="relative">
+                <Input
+                  type="number"
+                  step="any"
+                  value={form.btc_price}
+                  onChange={(e) => {
+                    setRateTouched(true);
+                    setForm({ ...form, btc_price: e.target.value });
+                  }}
+                  placeholder="95000"
+                />
+                {fetchingRate && (
+                  <Loader2
+                    size={14}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
+                  />
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {previewUsd > 0 ? (
+                  <>
+                    Se congela como{" "}
+                    <span className="font-medium text-foreground">{centsToUsd(previewUsd)}</span>.
+                    El saldo sigue siendo BTC; esto es lo que costó, y no se recalcula nunca.
+                  </>
+                ) : (
+                  <>
+                    Sugerido según el precio de cierre de la fecha elegida. Editalo si lo
+                    conseguiste a otro precio.
                   </>
                 )}
               </p>

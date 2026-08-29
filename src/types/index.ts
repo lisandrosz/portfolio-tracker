@@ -1,4 +1,4 @@
-import type { AssetType, TransactionType } from "@/lib/constants";
+import type { AssetType, Currency, TransactionType } from "@/lib/constants";
 
 export interface Asset {
   id: number;
@@ -8,10 +8,10 @@ export interface Asset {
   coingecko_id: string | null;
   fund_name: string | null; // ArgentinaDatos fund name for FCI auto-pricing
   group_name: string | null; // roll-up label (e.g. several BingX strategies under one heading)
-  currency: "USD" | "ARS"; // native currency of current_price / balance
-  quantity: number; // units (unit assets) or 1 (box assets)
+  currency: Currency; // native currency of current_price / balance
+  quantity: number; // units (unit assets), the BTC balance (BTC accounts), or 1 (box assets)
   avg_cost: number; // USD cents per unit (informational)
-  current_price: number; // native-currency cents: price per unit, balance for box assets, or cuotas paid for installment assets
+  current_price: number; // native-currency cents: price per unit, balance for box assets, cuotas paid for installment assets, or the USD price of one BTC for BTC accounts
   change_24h: number | null; // 24h % change (crypto only)
   // Installment assets (terreno) only:
   purchase_total: number; // native cents — agreed total price
@@ -60,12 +60,12 @@ export interface Transaction {
   asset_id: number;
   type: TransactionType;
   quantity: number;
-  price: number; // native cents per unit
+  price: number; // native cents per unit (USD cents per BTC on a BTC account)
   total: number; // native cents
   total_usd: number; // USD cents, frozen at transaction date — never recalculated
   fx_rate: number | null; // ARS per USD used to freeze total_usd (null for USD assets)
   fee: number; // native cents
-  currency: "USD" | "ARS";
+  currency: Currency;
   date: string;
   notes: string | null;
   link_id: string | null; // set on both legs of a paired operation (deleted together)

@@ -11,8 +11,19 @@ export function centsToNumber(cents: number): number {
   return cents / 100;
 }
 
-/** Format cents in a given native currency (USD or ARS). */
-export function formatMoney(cents: number, currency: "USD" | "ARS" = "USD"): string {
+/** A BTC amount (not cents): 0.01234567 -> "0.01234567 BTC". */
+export function formatBtc(amount: number): string {
+  return `${amount.toLocaleString("en-US", { maximumFractionDigits: 8 })} BTC`;
+}
+
+/**
+ * Format cents in a given native currency.
+ *
+ * BTC never reaches here: a bitcoin balance is an amount, not cents, so it goes
+ * through formatBtc. Falling back to USD keeps a stray call readable instead of
+ * printing a number off by eight decimal places.
+ */
+export function formatMoney(cents: number, currency: "USD" | "ARS" | "BTC" = "USD"): string {
   if (currency === "ARS") {
     return new Intl.NumberFormat("es-AR", {
       style: "currency",

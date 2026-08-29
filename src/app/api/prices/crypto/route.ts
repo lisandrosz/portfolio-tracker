@@ -23,8 +23,12 @@ export async function POST() {
     }
   }
 
+  // BTC-denominated accounts are priced here too: their current_price is the
+  // USD price of one bitcoin, refreshed exactly like a crypto holding's.
   const cryptoAssets = (await db
-    .prepare("SELECT * FROM assets WHERE type = 'crypto' AND coingecko_id IS NOT NULL")
+    .prepare(
+      "SELECT * FROM assets WHERE coingecko_id IS NOT NULL AND (type = 'crypto' OR currency = 'BTC')"
+    )
     .all()) as Asset[];
 
   if (cryptoAssets.length === 0) {

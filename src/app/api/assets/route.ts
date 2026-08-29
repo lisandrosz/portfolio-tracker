@@ -16,9 +16,12 @@ import {
   isBoxType,
   isInstallmentType,
   isDebtType,
+  isBtcDenominated,
   ASSET_CURRENCY,
+  BTC_COINGECKO_ID,
   type AssetType,
 } from "@/lib/constants";
+import { fetchHistoricalPrice } from "@/lib/coingecko";
 import type { Asset } from "@/types";
 import { z } from "zod";
 
@@ -41,6 +44,11 @@ const createAssetSchema = z.object({
   group_name: z.string().nullable().optional(), // roll-up label
   quantity: z.number().default(0), // units (unit assets)
   price: z.number().default(0), // native: price per unit, opening balance (box), or down payment (installment)
+  // Managed accounts only: "BTC" opens the account with its balance in bitcoin.
+  currency: z.enum(["USD", "BTC"]).optional(),
+  // USD price of one BTC to open a bitcoin account at; falls back to the price
+  // published for `date`.
+  btc_price: z.number().positive().optional(),
   purchase_total: z.number().default(0), // native: agreed total price (installment)
   installments_total: z.number().int().min(0).default(0), // cuota count (installment)
   // ARS per USD to freeze with; overrides the published blue for `date`.
@@ -65,7 +73,11 @@ export async function POST(request: NextRequest) {
     const db = await getDb();
     const symbol = data.symbol.toUpperCase();
     const type = data.type as AssetType;
-    const currency = ASSET_CURRENCY[type];
+    // Only a managed account gets to choose; every other type's currency is a
+    // property of what it is.
+    const currency =
+      type === "managed" && data.currency ? data.currency : ASSET_CURRENCY[type];
+    const btc = isBtcDenominated(currency);
     const box = isBoxType(type);
     const installment = isInstallmentType(type);
     const debt = isDebtType(type);
@@ -77,6 +89,21 @@ export async function POST(request: NextRequest) {
     // the published blue, and the result is stored, never recomputed later.
     const rate =
       currency === "ARS" ? data.usd_rate ?? (await getRateForDate(date)) : null;
+
+    // A bitcoin account opens with a BTC balance, so the USD it is worth needs
+    // the price of a bitcoin on the opening day. Without one there is nothing
+    // honest to record, so the request is refused rather than stored at zero.
+    let btcPriceCents = 0;
+    if (btc && data.price > 0) {
+      const btcPrice = data.btc_price ?? (await fetchHistoricalPrice(BTC_COINGECKO_ID, date));
+      if (!btcPrice || btcPrice <= 0) {
+        return Response.json(
+          { error: "No se pudo obtener el precio de BTC para esa fecha" },
+          { status: 502 }
+        );
+      }
+      btcPriceCents = numberToCents(btcPrice);
+    }
     const toUsd = (native: number) =>
       currency === "ARS" ? (rate && rate > 0 ? Math.round(native / rate) : 0) : native;
 
@@ -117,13 +144,16 @@ export async function POST(request: NextRequest) {
           data.name,
           symbol,
           type,
-          type === "crypto" ? data.coingecko_id ?? null : null,
+          // A BTC account is priced from the same feed as a bitcoin holding.
+          btc ? BTC_COINGECKO_ID : type === "crypto" ? data.coingecko_id ?? null : null,
           type === "fci" ? data.fund_name ?? null : null,
           data.group_name?.trim() || null,
           currency,
-          box || installment || debt ? 1 : 0,
-          // installment / debt: balance is derived from the ledger written below
-          installment || debt ? 0 : priceCents,
+          // BTC accounts keep the balance in quantity; other box assets pin it to 1.
+          btc ? data.price : box || installment || debt ? 1 : 0,
+          // installment / debt: balance is derived from the ledger written below.
+          // BTC: the column holds the price of a bitcoin, not the balance.
+          btc ? btcPriceCents : installment || debt ? 0 : priceCents,
           installment ? purchaseTotalCents : 0,
           installment ? toUsd(purchaseTotalCents) : 0,
           installment ? data.installments_total : 0,
@@ -178,15 +208,19 @@ export async function POST(request: NextRequest) {
         });
       }
     } else if (box && data.price > 0) {
-      // Opening contribution (deposit).
-      const totalNative = priceCents;
+      // Opening contribution (deposit). On a BTC account the amount deposited is
+      // the bitcoin, so it goes in `quantity` and the USD it was worth is frozen
+      // from that day's price — the same shape a crypto buy already uses.
+      const totalNative = btc ? Math.round(data.price * btcPriceCents) : priceCents;
       await db
         .prepare(
           `INSERT INTO transactions (asset_id, type, quantity, price, total, total_usd, fx_rate, currency, fee, date, notes)
-         VALUES (?, 'deposit', 0, 0, ?, ?, ?, ?, 0, ?, ?)`
+         VALUES (?, 'deposit', ?, ?, ?, ?, ?, ?, 0, ?, ?)`
         )
         .run(
           assetId,
+          btc ? data.price : 0,
+          btc ? btcPriceCents : 0,
           totalNative,
           toUsd(totalNative),
           rate,
@@ -195,7 +229,9 @@ export async function POST(request: NextRequest) {
           data.notes || "Saldo inicial"
         );
       // New asset already has the balance set; existing one must be bumped.
-      if (existing) await applyBoxFlow(db, assetId, totalNative);
+      if (existing) {
+        await applyBoxFlow(db, assetId, btc ? data.price : totalNative, currency);
+      }
     } else if (!box && !installment && !debt && data.quantity > 0 && data.price > 0) {
       // Opening buy.
       const totalNative = Math.round(data.quantity * priceCents);

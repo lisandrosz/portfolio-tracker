@@ -28,6 +28,7 @@ import {
   isInstallmentType,
   isDebtType,
   type AssetType,
+  isBtcDenominated,
 } from "@/lib/constants";
 import { numberToCents } from "@/lib/formatters";
 import { Plus, Pencil, Loader2 } from "lucide-react";
@@ -52,7 +53,13 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
     fund_name: asset?.fund_name || "",
     group_name: asset?.group_name || "",
     quantity: asset?.quantity?.toString() || "",
-    price: asset ? (asset.current_price / 100).toString() : "",
+    // For a BTC account current_price is the price of a bitcoin, and the balance
+    // — what's editable here — is the quantity.
+    price: asset
+      ? isBtcDenominated(asset.currency)
+        ? asset.quantity.toString()
+        : (asset.current_price / 100).toString()
+      : "",
     purchase_total: asset?.purchase_total ? (asset.purchase_total / 100).toString() : "",
     purchase_total_usd: asset?.purchase_total_usd
       ? (asset.purchase_total_usd / 100).toString()
@@ -78,7 +85,8 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
   const box = isBoxType(type);
   const installment = isInstallmentType(type);
   const debt = isDebtType(type);
-  const currency = ASSET_CURRENCY[type];
+  const currency = asset?.currency ?? ASSET_CURRENCY[type];
+  const btcAccount = isBtcDenominated(currency);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -195,6 +203,10 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
           body.installments_total = parseInt(form.installments_total) || 0;
         } else if (debt) {
           // Balance comes from the alta/pago ledger; only the label is editable.
+        } else if (btcAccount) {
+          // Bitcoin, not cents: the API rejects a dollar figure here, because
+          // current_price is the market price and CoinGecko owns it.
+          body.quantity = parseFloat(form.price) || 0;
         } else {
           body.current_price = numberToCents(parseFloat(form.price) || 0);
         }
@@ -240,6 +252,8 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
     : isEdit
       ? `Precio actual (${currency})`
       : `Precio (${currency})`;
+
+  const btcHint = btcAccount && isEdit;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -469,6 +483,13 @@ export function AssetForm({ asset, onSaved }: AssetFormProps) {
                 </div>
               )}
             </div>
+          )}
+
+          {btcHint && (
+            <p className="rounded-md bg-muted p-2 text-xs text-muted-foreground">
+              El saldo va en BTC. Actualizalo con lo que muestre la cuenta cuando el copytrading
+              lo mueva; el valor en dólares se recalcula solo con el precio de bitcoin.
+            </p>
           )}
 
           {type === "crypto" && form.coingecko_id && !isEdit && (

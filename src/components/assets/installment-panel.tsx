@@ -2,6 +2,7 @@
 
 import { Lock } from "lucide-react";
 import { installmentStats } from "@/lib/portfolio";
+import type { Currency } from "@/lib/constants";
 import { centsToUsd, formatMoney } from "@/lib/formatters";
 import { useBalance, mask } from "@/components/home/balance-context";
 import type { AssetWithValue, Transaction } from "@/types";
@@ -32,7 +33,7 @@ function Pair({
   label: string;
   native: number;
   usd?: number;
-  currency: "USD" | "ARS";
+  currency: Currency;
   hidden: boolean;
   note?: string;
   strong?: boolean;

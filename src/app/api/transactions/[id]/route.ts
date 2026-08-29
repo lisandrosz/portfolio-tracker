@@ -7,13 +7,19 @@ import {
   recalcInstallmentAsset,
   recalcDebtAsset,
 } from "@/lib/portfolio";
-import { isBoxType, isInstallmentType, isDebtType } from "@/lib/constants";
+import {
+  isBoxType,
+  isInstallmentType,
+  isDebtType,
+  isBtcDenominated,
+} from "@/lib/constants";
 import type { Asset } from "@/types";
 
 interface TxLeg {
   id: number;
   asset_id: number;
   type: string;
+  quantity: number;
   total: number;
   link_id: string | null;
 }
@@ -56,9 +62,15 @@ export async function DELETE(
     } else if (asset && isDebtType(asset.type)) {
       await recalcDebtAsset(db, leg.asset_id);
     } else if (asset && isBoxType(asset.type)) {
-      // Reverse the deposit/withdrawal effect on the balance.
-      const delta = leg.type === "deposit" ? -leg.total : leg.total;
-      await applyBoxFlow(db, leg.asset_id, delta);
+      // Reverse the deposit/withdrawal effect on the balance. A BTC account moved
+      // by the bitcoin in `quantity`, already signed by direction, so undoing it
+      // is just the opposite sign.
+      const delta = isBtcDenominated(asset.currency)
+        ? -leg.quantity
+        : leg.type === "deposit"
+          ? -leg.total
+          : leg.total;
+      await applyBoxFlow(db, leg.asset_id, delta, asset.currency);
     } else {
       await recalcUnitAsset(db, leg.asset_id);
     }

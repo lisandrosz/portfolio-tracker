@@ -36,8 +36,12 @@ export async function GET(request: Request) {
 
   // 1) Crypto prices (most volatile). Failures fall back to last-known values.
   try {
+    // BTC-denominated accounts are priced here too: their current_price is the
+    // USD price of one bitcoin, refreshed exactly like a crypto holding's.
     const cryptos = (await db
-      .prepare("SELECT * FROM assets WHERE type = 'crypto' AND coingecko_id IS NOT NULL")
+      .prepare(
+        "SELECT * FROM assets WHERE coingecko_id IS NOT NULL AND (type = 'crypto' OR currency = 'BTC')"
+      )
       .all()) as Asset[];
     if (cryptos.length) {
       const prices = await fetchCryptoPrices(cryptos.map((a) => a.coingecko_id!));

@@ -3,6 +3,7 @@ import {
   INFLOW_TYPES,
   OUTFLOW_TYPES,
   isBoxType,
+  isBtcDenominated,
   debtCounterLegType,
   debtCounterLegNote,
 } from "./constants";
@@ -22,7 +23,24 @@ export function usdCents(
   if (currency === "ARS") {
     return blue && blue > 0 ? Math.round(nativeCents / blue) : 0;
   }
+  // BTC arrives already in USD cents: a bitcoin account's native value is its
+  // BTC balance times the USD price of one BTC, so there is nothing left to
+  // convert. Same pass-through as USD, for a different reason.
   return nativeCents;
+}
+
+/**
+ * A box account's balance, in whatever unit the account keeps it: a BTC amount
+ * for a bitcoin-denominated account, native cents for everything else.
+ *
+ * Worth going through rather than reading `current_price` directly — on a BTC
+ * account that column is the price of a bitcoin, not the balance, so a raw read
+ * silently compares a balance against a quote.
+ */
+export function boxBalance(
+  asset: Pick<Asset, "currency" | "quantity" | "current_price">
+): number {
+  return isBtcDenominated(asset.currency) ? asset.quantity : asset.current_price;
 }
 
 interface TxRow {
@@ -92,15 +110,36 @@ export async function recalcUnitAsset(db: DB, assetId: number) {
 }
 
 /**
- * Apply a deposit/withdrawal to a BOX asset's balance (current_price), in the
- * asset's native cents. `delta` is positive for inflow, negative for outflow.
+ * Apply a deposit/withdrawal to a BOX asset's balance. `delta` is positive for
+ * an inflow, negative for an outflow, expressed in the unit that account's
+ * balance is kept in: a BTC amount for a bitcoin account, native cents for the
+ * rest. Pass the asset's currency so the right column moves.
+ *
+ * A BTC account leaves price_updated_at alone: there the column tracks when the
+ * bitcoin price was last refreshed, and a deposit says nothing about that.
  */
-export async function applyBoxFlow(db: DB, assetId: number, deltaNative: number) {
+export async function applyBoxFlow(
+  db: DB,
+  assetId: number,
+  delta: number,
+  currency: string = "USD"
+) {
+  if (isBtcDenominated(currency)) {
+    // Rounded to the satoshi: bitcoin has eight decimals and nothing finer is
+    // real, while repeated float addition otherwise leaves 0.18000000000000002
+    // sitting in the balance.
+    await db
+      .prepare(
+        "UPDATE assets SET quantity = MAX(0, ROUND(quantity + ?, 8)), updated_at = datetime('now') WHERE id = ?"
+      )
+      .run(delta, assetId);
+    return;
+  }
   await db
     .prepare(
       "UPDATE assets SET current_price = MAX(0, current_price + ?), price_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
     )
-    .run(deltaNative, assetId);
+    .run(delta, assetId);
 }
 
 /** Asset fields installmentStats needs. Keeps callers free to pass a full Asset. */
@@ -251,7 +290,12 @@ export async function writeDebtCounterLeg(
       opts.notes || debtCounterLegNote(opts.debt.type, opts.movement, opts.debt.name),
       opts.linkId
     );
-  await applyBoxFlow(db, opts.counter.id, legType === "deposit" ? opts.totalNative : -opts.totalNative);
+  await applyBoxFlow(
+    db,
+    opts.counter.id,
+    legType === "deposit" ? opts.totalNative : -opts.totalNative,
+    opts.counter.currency
+  );
 }
 
 /**

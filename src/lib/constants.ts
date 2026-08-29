@@ -71,8 +71,36 @@ export function isNonPerformingType(type: string): boolean {
   return isCashType(type) || isDebtType(type) || isOffBalanceType(type);
 }
 
-// Native currency of each asset type (used for blue conversion to USD).
-export const ASSET_CURRENCY: Record<AssetType, "USD" | "ARS"> = {
+export type Currency = "USD" | "ARS" | "BTC";
+
+/** CoinGecko id backing a BTC-denominated account. */
+export const BTC_COINGECKO_ID = "bitcoin";
+
+/**
+ * Denominated in bitcoin: the balance is a BTC amount kept in `quantity`, and
+ * `current_price` holds the USD price of one BTC, refreshed like any crypto.
+ * Value then falls out of the same `quantity * current_price` every other asset
+ * already uses.
+ *
+ * The balance cannot live in `current_price` the way USD and ARS balances do:
+ * money is stored as integer cents, and 0.01234567 BTC does not survive that.
+ * `quantity` is REAL, so it carries all eight decimals.
+ */
+export function isBtcDenominated(currency: string): boolean {
+  return currency === "BTC";
+}
+
+/**
+ * Currencies a managed account can be opened in. Copytrading margined in BTC is
+ * a balance in bitcoin, not a dollar balance that happens to trade bitcoin, and
+ * the two revalue differently.
+ */
+export const MANAGED_CURRENCIES: Currency[] = ["USD", "BTC"];
+
+// Default currency of each asset type. Managed accounts can override it (see
+// MANAGED_CURRENCIES), which is why creation takes a currency instead of always
+// deriving it from the type.
+export const ASSET_CURRENCY: Record<AssetType, Currency> = {
   crypto: "USD",
   fci: "ARS",
   terreno: "ARS",

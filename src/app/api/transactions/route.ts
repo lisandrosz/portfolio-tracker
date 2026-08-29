@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import getDb from "@/lib/db";
 import { autoSnapshot } from "@/lib/snapshot";
 import { getRateForDate } from "@/lib/dolar-api";
+import { fetchHistoricalPrice } from "@/lib/coingecko";
 import {
   recalcUnitAsset,
   applyBoxFlow,
@@ -10,8 +11,11 @@ import {
   counterAccountError,
   writeDebtCounterLeg,
 } from "@/lib/portfolio";
-import { numberToCents, formatMoney } from "@/lib/formatters";
-import { isBoxType, isInstallmentType, isDebtType } from "@/lib/constants";
+import { numberToCents, formatMoney, formatBtc } from "@/lib/formatters";
+import { isBoxType, isInstallmentType, isDebtType,
+  isBtcDenominated,
+  BTC_COINGECKO_ID,
+} from "@/lib/constants";
 import type { Asset } from "@/types";
 import { z } from "zod";
 
@@ -27,6 +31,8 @@ const createTransactionSchema = z.object({
   // ARS per USD to freeze this transaction with. Overrides the published blue
   // for the date, because the rate actually paid is often not the published one.
   usd_rate: z.number().positive().optional(),
+  // BTC accounts: USD price of one bitcoin to value this movement at.
+  btc_price: z.number().positive().optional(),
   // Account the money actually moved through (debt movements only). Optional:
   // omit it for a debt settled outside anything tracked here.
   counter_asset_id: z.number().nullable().optional(),
@@ -92,6 +98,7 @@ export async function POST(request: NextRequest) {
     const installment = isInstallmentType(asset.type);
     const debt = isDebtType(asset.type);
     const box = isBoxType(asset.type);
+    const btcAccount = isBtcDenominated(asset.currency);
     const shape = installment ? "installment" : debt ? "debt" : box ? "box" : "unit";
     const feeCents = numberToCents(data.fee || 0);
 
@@ -162,7 +169,29 @@ export async function POST(request: NextRequest) {
       if (data.amount == null || data.amount <= 0) {
         return Response.json({ error: "Falta el monto" }, { status: 400 });
       }
-      totalNative = numberToCents(data.amount);
+      if (btcAccount) {
+        // The amount is bitcoin. It rides in `quantity`, and `total` is what that
+        // bitcoin was worth on the day — frozen, like every other total_usd.
+        const btcPrice =
+          data.btc_price ?? (await fetchHistoricalPrice(BTC_COINGECKO_ID, data.date));
+        if (!btcPrice || btcPrice <= 0) {
+          return Response.json(
+            { error: "No se pudo obtener el precio de BTC para esa fecha" },
+            { status: 502 }
+          );
+        }
+        if (data.type === "withdrawal" && data.amount > asset.quantity + 1e-9) {
+          return Response.json(
+            { error: `No podés retirar más de ${formatBtc(asset.quantity)}` },
+            { status: 400 }
+          );
+        }
+        priceCents = numberToCents(btcPrice);
+        qty = data.type === "deposit" ? data.amount : -data.amount;
+        totalNative = Math.round(data.amount * priceCents);
+      } else {
+        totalNative = numberToCents(data.amount);
+      }
     } else {
       // buy / sell: quantity x price.
       if (data.quantity == null || data.quantity <= 0 || data.price == null) {
@@ -225,8 +254,10 @@ export async function POST(request: NextRequest) {
     } else if (debt) {
       await recalcDebtAsset(db, data.asset_id);
     } else if (box) {
-      const delta = data.type === "deposit" ? totalNative : -totalNative;
-      await applyBoxFlow(db, data.asset_id, delta);
+      // A BTC account's balance moves by the bitcoin, not by the dollars.
+      const moved = btcAccount ? Math.abs(qty) : totalNative;
+      const delta = data.type === "deposit" ? moved : -moved;
+      await applyBoxFlow(db, data.asset_id, delta, asset.currency);
     } else {
       await recalcUnitAsset(db, data.asset_id);
     }
