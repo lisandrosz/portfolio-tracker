@@ -112,6 +112,37 @@ export const ASSET_CURRENCY: Record<AssetType, Currency> = {
   por_pagar: "USD",
 };
 
+/**
+ * What a holding is denominated in, or null if it can't take part in a transfer.
+ *
+ * A transfer moves the same thing from one place to another, so both sides have
+ * to be counted in the same unit — that is the whole reason it can leave value
+ * and contributed capital untouched. Bitcoin held in a wallet and bitcoin held
+ * in a copytrading account are the same unit, which is why a crypto holding and
+ * a BTC-denominated account meet here on `coin:bitcoin`.
+ *
+ * Anything whose balance isn't a movable amount (FCI cuotapartes, a terreno's
+ * cuota ledger, a debt) returns null and stays out.
+ */
+export function transferUnit(asset: {
+  type: string;
+  currency: string;
+  coingecko_id?: string | null;
+}): string | null {
+  if (asset.type === "crypto") {
+    return asset.coingecko_id ? `coin:${asset.coingecko_id}` : null;
+  }
+  if (!isBoxType(asset.type)) return null;
+  return isBtcDenominated(asset.currency)
+    ? `coin:${BTC_COINGECKO_ID}`
+    : asset.currency;
+}
+
+/** The coin id behind a transfer unit, or null when it's a fiat balance. */
+export function transferCoinId(unit: string): string | null {
+  return unit.startsWith("coin:") ? unit.slice("coin:".length) : null;
+}
+
 export const TRANSACTION_TYPES = {
   buy: "Compra",
   sell: "Venta",

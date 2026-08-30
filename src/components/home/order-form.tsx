@@ -34,6 +34,8 @@ import {
   MANAGED_CURRENCIES,
   BTC_COINGECKO_ID,
   type Currency,
+  transferUnit,
+  transferCoinId,
 } from "@/lib/constants";
 import { Plus, Loader2, Lock } from "lucide-react";
 import { centsToUsd, formatBtc, formatMoney, numberToCents } from "@/lib/formatters";
@@ -115,6 +117,23 @@ export function OrderForm({ assets, onSaved }: Props) {
   const btcAccount = isBtcDenominated(currency);
   const btcPrice = parseFloat(form.btc_price) || 0;
 
+  // What a transfer can touch is wider: anything counted in a movable unit. A
+  // bitcoin holding and a BTC-denominated account are the same unit, so sending
+  // coins from the wallet into the account is a transfer like any other.
+  const transferAssets = assets.filter((a) => transferUnit(a) !== null);
+  const fromAsset = transferAssets.find((a) => a.id.toString() === transferFrom);
+  const fromUnit = fromAsset ? transferUnit(fromAsset) : null;
+  const transferCoin = fromUnit ? transferCoinId(fromUnit) : null;
+  // Only holdings counted the same way: anything else would be a conversion.
+  const transferTargets = transferAssets.filter(
+    (a) => a.id !== fromAsset?.id && transferUnit(a) === fromUnit
+  );
+
+  /** A balance in its own unit, for the transfer helpers. */
+  function transferBalance(a: Asset) {
+    return transferCoinId(transferUnit(a) ?? "") ? a.quantity : a.current_price / 100;
+  }
+
   /** A box account's balance in its own unit. */
   function balanceLabel(a: Asset) {
     return isBtcDenominated(a.currency)
@@ -149,13 +168,11 @@ export function OrderForm({ assets, onSaved }: Props) {
     }
   }, []);
 
-  const fetchBtcPrice = useCallback(async (date: string) => {
+  const fetchCoinPrice = useCallback(async (date: string, coinId = BTC_COINGECKO_ID) => {
     if (!date) return;
     setFetchingRate(true);
     try {
-      const res = await fetch(
-        `/api/prices/history?coin_id=${BTC_COINGECKO_ID}&date=${date}`
-      );
+      const res = await fetch(`/api/prices/history?coin_id=${coinId}&date=${date}`);
       const json = await res.json();
       if (json.data?.price) setForm((p) => ({ ...p, btc_price: json.data.price.toString() }));
     } finally {
@@ -167,10 +184,16 @@ export function OrderForm({ assets, onSaved }: Props) {
   // same question — what a unit of the account's currency was worth that day.
   useEffect(() => {
     if (!open || rateTouched) return;
+    // In transfer mode the unit comes from the origin, not from the order form.
+    if (mode === "transfer") {
+      if (transferCoin) fetchCoinPrice(form.date, transferCoin);
+      else if (fromAsset?.currency === "ARS") fetchRate(form.date);
+      return;
+    }
     if (needsRate) fetchRate(form.date);
-    else if (btcAccount) fetchBtcPrice(form.date);
+    else if (btcAccount) fetchCoinPrice(form.date);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, needsRate, btcAccount, assetChoice, form.newType, form.newCurrency]);
+  }, [open, mode, needsRate, btcAccount, transferCoin, assetChoice, form.newType, form.newCurrency]);
 
   function reset() {
     setMode("order");
@@ -277,7 +300,7 @@ export function OrderForm({ assets, onSaved }: Props) {
       fetchRate(date);
     } else if (btcAccount) {
       setRateTouched(false);
-      fetchBtcPrice(date);
+      fetchCoinPrice(date);
     }
   }
 
@@ -334,9 +357,9 @@ export function OrderForm({ assets, onSaved }: Props) {
       ? Math.round(selected.purchase_total / selected.installments_total)
       : 0;
 
-  // Accounts money can move between: box balances only.
+  // Accounts a debt movement can run through: box balances only.
   const boxAssets = assets.filter((a) => isBoxType(a.type));
-  const fromAsset = boxAssets.find((a) => a.id.toString() === transferFrom);
+
 
   // Accounts that can back a debt movement. Same currency only: settling a USD
   // debt out of a peso account is a conversion at some rate, not a transfer, and
@@ -359,9 +382,7 @@ export function OrderForm({ assets, onSaved }: Props) {
           notes: form.notes || null,
         };
         if (fromAsset?.currency === "ARS" && rate > 0) body.usd_rate = rate;
-        if (fromAsset && isBtcDenominated(fromAsset.currency) && btcPrice > 0) {
-          body.btc_price = btcPrice;
-        }
+        if (transferCoin && btcPrice > 0) body.coin_price = btcPrice;
 
         const res = await fetch("/api/transactions/transfer", {
           method: "POST",
@@ -499,7 +520,7 @@ export function OrderForm({ assets, onSaved }: Props) {
 
         {/* Transfers move money between accounts you already have, so they are a
             different operation, not another kind of order. */}
-        {boxAssets.length >= 2 && (
+        {transferAssets.length >= 2 && (
           <div className="flex gap-1 rounded-lg bg-muted p-0.5 text-xs">
             {(["order", "transfer"] as const).map((m) => (
               <button
@@ -523,17 +544,27 @@ export function OrderForm({ assets, onSaved }: Props) {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label>Desde</Label>
-              <Select value={transferFrom} onValueChange={(v) => v && setTransferFrom(v)}>
+              <Select
+                value={transferFrom}
+                onValueChange={(v) => {
+                  if (!v) return;
+                  setTransferFrom(v);
+                  // The destination list depends on the origin's unit, so a
+                  // previous pick may no longer be a legal target.
+                  setTransferTo("");
+                  setRateTouched(false);
+                }}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Cuenta de origen">
                     {(v) => {
-                      const a = boxAssets.find((x) => x.id.toString() === v);
-                      return a ? `${a.symbol} · ${a.name}` : "Cuenta de origen";
+                      const a = transferAssets.find((x) => x.id.toString() === v);
+                      return a ? `${a.symbol} · ${a.name}` : "Origen";
                     }}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {boxAssets.map((a) => (
+                  {transferAssets.map((a) => (
                     <SelectItem key={a.id} value={a.id.toString()}>
                       {a.symbol} — {balanceLabel(a)}
                     </SelectItem>
@@ -548,36 +579,37 @@ export function OrderForm({ assets, onSaved }: Props) {
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Cuenta de destino">
                     {(v) => {
-                      const a = boxAssets.find((x) => x.id.toString() === v);
-                      return a ? `${a.symbol} · ${a.name}` : "Cuenta de destino";
+                      const a = transferTargets.find((x) => x.id.toString() === v);
+                      return a ? `${a.symbol} · ${a.name}` : "Destino";
                     }}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {boxAssets
-                    .filter((a) => a.id.toString() !== transferFrom)
-                    .map((a) => (
-                      <SelectItem key={a.id} value={a.id.toString()}>
-                        {a.symbol} — {balanceLabel(a)}
-                      </SelectItem>
-                    ))}
+                  {transferTargets.map((a) => (
+                    <SelectItem key={a.id} value={a.id.toString()}>
+                      {a.symbol} — {balanceLabel(a)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Monto ({fromAsset?.currency ?? "USD"})</Label>
+                <Label>
+                  Monto (
+                  {transferCoin === BTC_COINGECKO_ID
+                    ? "BTC"
+                    : transferCoin
+                      ? fromAsset?.symbol
+                      : (fromUnit ?? "USD")}
+                  )
+                </Label>
                 {fromAsset && (
                   <button
                     type="button"
                     onClick={() =>
-                      setForm({
-                        ...form,
-                        amount: isBtcDenominated(fromAsset.currency)
-                          ? fromAsset.quantity.toString()
-                          : (fromAsset.current_price / 100).toString(),
-                      })
+                      setForm({ ...form, amount: transferBalance(fromAsset).toString() })
                     }
                     className="text-xs font-medium text-primary hover:underline"
                   >
@@ -1124,7 +1156,7 @@ export function OrderForm({ assets, onSaved }: Props) {
                     type="button"
                     onClick={() => {
                       setRateTouched(false);
-                      fetchBtcPrice(form.date);
+                      fetchCoinPrice(form.date);
                     }}
                     className="text-xs font-medium text-primary hover:underline"
                   >
