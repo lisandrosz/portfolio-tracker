@@ -878,7 +878,12 @@ export function OrderForm({ assets, onSaved }: Props) {
                       : `Saldo inicial (${currency})`
                     : `Monto (${currency})`}
                 </Label>
-                {!isNew && orderType === "withdrawal" && selected && (
+                {isNew && !installment && (
+                <p className="text-xs text-muted-foreground">
+                  Podés dejarlo vacío y cargar los movimientos después.
+                </p>
+              )}
+              {!isNew && orderType === "withdrawal" && selected && (
                   <button
                     type="button"
                     onClick={() =>
@@ -921,7 +926,9 @@ export function OrderForm({ assets, onSaved }: Props) {
                 value={form.amount}
                 onChange={(e) => setForm({ ...form, amount: e.target.value })}
                 placeholder={btcAccount ? "0.05" : "1000"}
-                required
+                // Opening an account with nothing in it is a normal thing to do;
+                // a movement on an existing one without an amount is not.
+                required={!isNew}
               />
               {!isNew && orderType === "withdrawal" && selected && (
                 <p className="text-xs text-muted-foreground">

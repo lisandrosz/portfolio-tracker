@@ -1,10 +1,16 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Trash2, ListOrdered, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  Trash2,
+  ListOrdered,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+} from "lucide-react";
 import {
   ASSET_TYPES,
   isBoxType,
@@ -22,6 +28,15 @@ import {
   formatPercent,
   formatQuantity,
 } from "@/lib/formatters";
+import {
+  COLUMNS,
+  DEFAULT_SORT,
+  SORT_STORAGE_KEY,
+  buildRows,
+  groupTotals,
+  type SortDir,
+  type SortKey,
+} from "@/lib/holdings-sort";
 import { AssetForm } from "@/components/assets/asset-form";
 import { OrderForm } from "./order-form";
 import { useBalance, mask } from "./balance-context";
@@ -43,40 +58,51 @@ interface Props {
   onOpenMovements: () => void;
 }
 
-/**
- * Order the rows so grouped assets sit together under their heading, and work
- * out which groups are real (a lone member is just a row, not a group).
- */
-function buildRows(shown: AssetWithValue[]) {
-  const members = new Map<string, AssetWithValue[]>();
-  for (const a of shown) {
-    if (!a.group_name) continue;
-    if (!members.has(a.group_name)) members.set(a.group_name, []);
-    members.get(a.group_name)!.push(a);
-  }
-  // One asset carrying a label isn't worth a heading and a subtotal of itself.
-  for (const [name, list] of members) if (list.length < 2) members.delete(name);
-
-  const ungrouped = shown.filter((a) => !a.group_name || !members.has(a.group_name));
-  return { groups: members, ungrouped };
-}
-
-function groupTotals(list: AssetWithValue[]) {
-  const value = list.reduce((s, a) => s + a.equity, 0);
-  const perf = list.filter((a) => !isCashType(a.type) && !isDebtType(a.type));
-  const gain = perf.reduce((s, a) => s + a.profit_loss, 0);
-  const gross = perf.reduce((s, a) => s + a.gross_invested, 0);
-  return { value, gain, gross, pct: gross > 0 ? (gain / gross) * 100 : 0, hasPerf: perf.length > 0 };
-}
-
 export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
   const { hidden } = useBalance();
   const router = useRouter();
   const [tab, setTab] = useState("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState(DEFAULT_SORT);
+
+  // Restored after mount rather than in the initial state. The page is
+  // prerendered, so seeding the sort from localStorage during the first render
+  // would put the header arrow on a different column than the server's HTML and
+  // break hydration. One extra render is the cheaper side of that trade — which
+  // is why the setState-in-effect rule is waived here rather than worked around.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(SORT_STORAGE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (COLUMNS.some((c) => c.key === parsed?.key) && (parsed.dir === 1 || parsed.dir === -1)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setSort({ key: parsed.key, dir: parsed.dir });
+      }
+    } catch {
+      /* private mode, cleared storage, corrupt value: the default is fine */
+    }
+  }, []);
+
+  function sortBy(key: SortKey) {
+    setSort((prev) => {
+      // Same column flips direction; a new one starts the way that column reads
+      // best — names A→Z, money biggest first.
+      const next =
+        prev.key === key
+          ? { key, dir: (prev.dir === 1 ? -1 : 1) as SortDir }
+          : { key, dir: (key === "symbol" ? 1 : -1) as SortDir };
+      try {
+        localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* not being able to remember the choice shouldn't block making it */
+      }
+      return next;
+    });
+  }
 
   const shown = assets.filter((a) => TABS.find((t) => t.key === tab)!.match(a.type));
-  const { groups, ungrouped } = buildRows(shown);
+  const rows = buildRows(shown, sort.key, sort.dir);
 
   function toggleGroup(name: string) {
     setCollapsed((prev) => {
@@ -241,12 +267,32 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
-              <th className="px-4 py-2 font-medium">Nombre</th>
-              <th className="px-4 py-2 text-right font-medium">Precio</th>
-              <th className="px-4 py-2 text-right font-medium">PPC</th>
-              <th className="px-4 py-2 text-right font-medium">Cantidad</th>
-              <th className="px-4 py-2 text-right font-medium">Valor</th>
-              <th className="px-4 py-2 text-right font-medium">Ganancia</th>
+              {COLUMNS.map((c) => {
+                const active = sort.key === c.key;
+                return (
+                  <th
+                    key={c.key}
+                    className={cn("px-4 py-2 font-medium", c.right && "text-right")}
+                  >
+                    <button
+                      onClick={() => sortBy(c.key)}
+                      className={cn(
+                        "inline-flex items-center gap-1 transition-colors hover:text-foreground",
+                        active && "text-foreground"
+                      )}
+                      aria-label={`Ordenar por ${c.label}`}
+                    >
+                      {c.label}
+                      {active &&
+                        (sort.dir === 1 ? (
+                          <ChevronUp size={12} className="text-primary" />
+                        ) : (
+                          <ChevronDown size={12} className="text-primary" />
+                        ))}
+                    </button>
+                  </th>
+                );
+              })}
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
@@ -259,11 +305,14 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
               </tr>
             ) : (
               <>
-                {[...groups.entries()].map(([name, list]) => {
+                {rows.map((row) => {
+                  if (row.kind === "asset") return renderRow(row.asset, false);
+                  const { name, list } = row;
                   const t = groupTotals(list);
                   const open = !collapsed.has(name);
                   return (
-                    <Fragment key={name}>
+                    // Namespaced: groups and assets share one key space now.
+                    <Fragment key={`group:${name}`}>
                       <tr
                         onClick={() => toggleGroup(name)}
                         className="cursor-pointer border-t border-border/60 bg-muted/40 hover:bg-accent/40"
@@ -308,7 +357,6 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
                     </Fragment>
                   );
                 })}
-                {ungrouped.map((a) => renderRow(a, false))}
               </>
             )}
           </tbody>

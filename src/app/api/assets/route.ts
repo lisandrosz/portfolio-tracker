@@ -93,8 +93,10 @@ export async function POST(request: NextRequest) {
     // A bitcoin account opens with a BTC balance, so the USD it is worth needs
     // the price of a bitcoin on the opening day. Without one there is nothing
     // honest to record, so the request is refused rather than stored at zero.
+    // Fetched even for an empty account: current_price is the price column, and
+    // leaving it at 0 would show the account as worthless until the next poll.
     let btcPriceCents = 0;
-    if (btc && data.price > 0) {
+    if (btc) {
       const btcPrice = data.btc_price ?? (await fetchHistoricalPrice(BTC_COINGECKO_ID, date));
       if (!btcPrice || btcPrice <= 0) {
         return Response.json(

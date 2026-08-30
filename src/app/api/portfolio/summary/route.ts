@@ -2,6 +2,7 @@ import getDb from "@/lib/db";
 import { getUsdRate } from "@/lib/dolar-api";
 import { usdCents, netInvestedUsd, grossInvestedUsd, installmentStats } from "@/lib/portfolio";
 import {
+  isBoxType,
   isCashType,
   isInstallmentType,
   isDebtType,
@@ -103,11 +104,16 @@ export async function GET() {
       };
     })
     // Keep active holdings and positions that still carry realized P&L or debt.
-    // Ledger-only rows always stay: a terreno with no cuota paid yet is worth
-    // nothing by design, and it still has to be visible to load cuotas into.
+    //
+    // Accounts and ledger-only rows always stay, whatever their balance. An
+    // account is something you keep, not a position that closes: one opened with
+    // no money in it yet has to be visible to load movements into, and one you
+    // emptied should read as $0.00 rather than silently disappear. Same reason a
+    // terreno with no cuota paid yet stays on screen.
     .filter(
       (a) =>
         isOffBalanceType(a.type) ||
+        isBoxType(a.type) ||
         a.current_value > 0 ||
         a.liability > 0 ||
         Math.abs(a.net_invested) > 0
