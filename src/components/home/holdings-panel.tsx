@@ -137,9 +137,11 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
   const totalPct = totalGross > 0 ? (totalGain / totalGross) * 100 : 0;
   const hasInvested = invested.length > 0;
 
-  // Share of net worth, matching the donut. Debts have none.
+  // Share of what is held, debts left out: measured against net worth, a debt
+  // shrinks the base and the holdings add up to more than 100%.
+  const totalHeld = assets.reduce((s, a) => s + Math.max(0, a.equity), 0);
   const share = (equity: number) =>
-    totalValue > 0 && equity > 0 ? `${((equity / totalValue) * 100).toFixed(1)}%` : "";
+    totalHeld > 0 && equity > 0 ? `${((equity / totalHeld) * 100).toFixed(1)}%` : "";
 
   async function handleDelete(id: number) {
     if (!confirm("Eliminar este activo y todas sus transacciones?")) return;

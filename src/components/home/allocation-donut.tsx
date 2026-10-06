@@ -9,10 +9,9 @@ const COLORS = ["#f59e0b", "#fb923c", "#ec4899", "#f472b6", "#a78bfa", "#6b7280"
 
 interface Props {
   assets: AssetWithValue[];
-  totalValue: number;
 }
 
-export function AllocationDonut({ assets, totalValue }: Props) {
+export function AllocationDonut({ assets }: Props) {
   const { hidden } = useBalance();
 
   // Slice by equity (value net of debt): a terreno's gross price would swamp the
@@ -24,7 +23,10 @@ export function AllocationDonut({ assets, totalValue }: Props) {
   const data = top.map((a) => ({ name: a.symbol, value: a.equity }));
   if (restValue > 0) data.push({ name: "Otros", value: restValue });
 
-  const pct = (v: number) => (totalValue > 0 ? ((v / totalValue) * 100).toFixed(2) : "0.00");
+  // Slices are shares of what is held. Net worth would be the wrong base: a
+  // debt shrinks it and the slices would add up to more than 100%.
+  const held = positive.reduce((s, a) => s + a.equity, 0);
+  const pct = (v: number) => (held > 0 ? ((v / held) * 100).toFixed(2) : "0.00");
 
   return (
     <div className="rounded-xl border border-border bg-card p-4">
