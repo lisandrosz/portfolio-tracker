@@ -44,6 +44,7 @@ export async function autoSnapshot(blueArg?: number | null) {
   let investedLiabilities = 0;
   let investedCapital = 0;
   const breakdown: Record<string, number> = {};
+  const assetGains: Record<number, number> = {};
 
   for (const asset of assets) {
     // Ledger-only holdings never reach the chart: they have no value to plot.
@@ -60,6 +61,7 @@ export async function autoSnapshot(blueArg?: number | null) {
     } else {
       const nativeValue = Math.round(asset.quantity * asset.current_price);
       value = usdCents(nativeValue, asset.currency, blue);
+      assetGains[asset.id] = value - netInvestedUsd(txns);
     }
 
     totalValue += value;
@@ -84,9 +86,9 @@ export async function autoSnapshot(blueArg?: number | null) {
 
   await db
     .prepare(
-      `INSERT INTO portfolio_snapshots (total_value, total_cost, total_liabilities, date, breakdown)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(date) DO UPDATE SET total_value = ?, total_cost = ?, total_liabilities = ?, breakdown = ?`
+      `INSERT INTO portfolio_snapshots (total_value, total_cost, total_liabilities, date, breakdown, asset_gains)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(date) DO UPDATE SET total_value = ?, total_cost = ?, total_liabilities = ?, breakdown = ?, asset_gains = ?`
     )
     .run(
       totalValue,
@@ -94,9 +96,11 @@ export async function autoSnapshot(blueArg?: number | null) {
       totalLiabilities,
       day,
       JSON.stringify(breakdown),
+      JSON.stringify(assetGains),
       totalValue,
       totalCost,
       totalLiabilities,
-      JSON.stringify(breakdown)
+      JSON.stringify(breakdown),
+      JSON.stringify(assetGains)
     );
 }

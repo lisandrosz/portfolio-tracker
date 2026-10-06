@@ -170,4 +170,12 @@ export async function initializeSchema(db: Client) {
     hasSnapshotCol("total_liabilities"),
     "ALTER TABLE portfolio_snapshots ADD COLUMN total_liabilities INTEGER NOT NULL DEFAULT 0"
   );
+  // Per-asset gain (USD cents, JSON keyed by asset id) for holdings with no
+  // price history. A rebuild can only replay their contributed capital, so this
+  // is the one record of how much they had earned on each day.
+  await addColumn(
+    db,
+    hasSnapshotCol("asset_gains"),
+    "ALTER TABLE portfolio_snapshots ADD COLUMN asset_gains TEXT"
+  );
 }

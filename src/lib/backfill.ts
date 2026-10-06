@@ -45,8 +45,13 @@ function enumerateDates(from: string, to: string): string[] {
  * - Terreno: skipped. It's a cuota ledger, not a holding — see isOffBalanceType.
  * - Debts (por_cobrar / por_pagar): outstanding USD balance replayed from altas
  *   and pagos; payables land in liabilities instead of value.
- * - FCI / box accounts (BingX, plazo, cash): value = net invested over time
- *   (no historical market value available; "today" gets live values via autoSnapshot).
+ * - FCI / box accounts (BingX, plazo, cash): no historical market value, so
+ *   value = net invested over time plus the gain the asset had on that day, as
+ *   recorded by the snapshot being replaced (carried forward across gaps). The
+ *   gain is what a contribution can't change, so a backdated deposit moves the
+ *   curve by the deposit and nothing else. Without it every rebuild wiped the
+ *   earnings off the past and the whole lot reappeared as a cliff on today.
+ *   "Today" gets live values via autoSnapshot.
  */
 export async function rebuildHistory(): Promise<{ days: number }> {
   const db = await getDb();
@@ -98,9 +103,24 @@ export async function rebuildHistory(): Promise<{ days: number }> {
   }
 
 
-  const upsertSql = `INSERT INTO portfolio_snapshots (total_value, total_cost, total_liabilities, date, breakdown)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(date) DO UPDATE SET total_value = ?, total_cost = ?, total_liabilities = ?, breakdown = ?`;
+  // Gains recorded by the snapshots about to be replaced, by date then asset.
+  const priorGains = new Map<string, Record<string, number>>();
+  const prior = (await db
+    .prepare("SELECT date, asset_gains FROM portfolio_snapshots WHERE asset_gains IS NOT NULL")
+    .all()) as Array<{ date: string; asset_gains: string }>;
+  for (const row of prior) {
+    try {
+      priorGains.set(row.date, JSON.parse(row.asset_gains));
+    } catch {
+      // A corrupt row just means no gain on record for that day.
+    }
+  }
+  // Last known gain per asset, carried forward day by day.
+  const carried = new Map<number, number>();
+
+  const upsertSql = `INSERT INTO portfolio_snapshots (total_value, total_cost, total_liabilities, date, breakdown, asset_gains)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(date) DO UPDATE SET total_value = ?, total_cost = ?, total_liabilities = ?, breakdown = ?, asset_gains = ?`;
 
   // Authoritative rebuild: drop stale rows (e.g. dates before the new earliest
   // transaction) and recompute the full range from scratch, atomically in one batch.
@@ -115,9 +135,15 @@ export async function rebuildHistory(): Promise<{ days: number }> {
     let investedLiabilities = 0;
     let investedCapital = 0;
     const breakdown: Record<string, number> = {};
+    const assetGains: Record<number, number> = {};
+    const recorded = priorGains.get(D);
 
     for (const a of assets) {
       if (isOffBalanceType(a.type)) continue;
+      if (!isDebtType(a.type)) {
+        const g = recorded?.[a.id];
+        if (g != null) carried.set(a.id, g);
+      }
 
       const ats = txByAsset.get(a.id) ?? [];
       let invested = 0;
@@ -134,19 +160,29 @@ export async function rebuildHistory(): Promise<{ days: number }> {
       }
       if (owed < 0) owed = 0;
 
+      // Only meaningful once the asset holds something: before its first
+      // transaction there is nothing for a gain to sit on.
+      const held = ats.length > 0 && ats[0].date <= D;
+      const withGain = () => {
+        const g = held ? (carried.get(a.id) ?? 0) : 0;
+        if (held) assetGains[a.id] = g;
+        return invested + g;
+      };
+
       let valueUsd: number;
       let liabilityUsd = 0;
       if (a.type === "crypto") {
         const price = cryptoPrices.get(a.id)?.get(D);
-        valueUsd = price != null ? Math.round(qty * price * 100) : invested;
+        valueUsd = price != null ? Math.round(qty * price * 100) : withGain();
       } else if (isDebtType(a.type)) {
         // Already USD, so the balance replayed from the ledger is the value —
         // no rate conversion and no historical price to look up.
         valueUsd = isPayableType(a.type) ? 0 : owed;
         if (isPayableType(a.type)) liabilityUsd = owed;
       } else {
-        // FCI / box: no historical market value -> track contributed capital.
-        valueUsd = invested;
+        // FCI / box: no historical market value -> contributed capital plus the
+        // gain on record.
+        valueUsd = withGain();
       }
       if (valueUsd < 0) valueUsd = 0;
 
@@ -167,6 +203,7 @@ export async function rebuildHistory(): Promise<{ days: number }> {
     const totalCost = totalValue - totalLiabilities - gain;
 
     const json = JSON.stringify(breakdown);
+    const gainsJson = JSON.stringify(assetGains);
     stmts.push({
       sql: upsertSql,
       args: [
@@ -175,10 +212,12 @@ export async function rebuildHistory(): Promise<{ days: number }> {
         totalLiabilities,
         D,
         json,
+        gainsJson,
         totalValue,
         totalCost,
         totalLiabilities,
         json,
+        gainsJson,
       ],
     });
   }
