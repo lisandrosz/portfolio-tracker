@@ -34,8 +34,11 @@ export function AllocationDonut({ assets, totalValue }: Props) {
           Sin datos para mostrar
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-4 sm:flex-row">
-          <ResponsiveContainer width="100%" height={220} className="max-w-[240px]">
+        <div className="flex flex-col items-center gap-6 sm:flex-row sm:gap-10">
+          {/* Fixed box: a percentage width collapses to nothing once the card
+              spans the whole row and the legend claims the free space. */}
+          <div className="h-[220px] w-[240px] shrink-0">
+          <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
                 data={data}
@@ -63,7 +66,8 @@ export function AllocationDonut({ assets, totalValue }: Props) {
               />
             </PieChart>
           </ResponsiveContainer>
-          <div className="grid w-full gap-2 sm:grid-cols-2 sm:gap-x-10">
+          </div>
+          <div className="grid w-full max-w-xl gap-2 sm:grid-cols-2 sm:gap-x-10">
             {data.map((d, i) => (
               <div key={d.name} className="flex items-center justify-between text-sm">
                 <span className="flex items-center gap-2">

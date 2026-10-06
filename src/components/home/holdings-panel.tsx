@@ -2,7 +2,6 @@
 
 import { Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Trash2,
@@ -17,6 +16,7 @@ import {
   isCashType,
   isInstallmentType,
   isDebtType,
+  isPayableType,
   isOffBalanceType,
   type AssetType,
   isBtcDenominated,
@@ -43,14 +43,22 @@ import { useBalance, mask } from "./balance-context";
 import { cn } from "@/lib/utils";
 import type { AssetWithValue } from "@/types";
 
-const TABS: { key: string; label: string; match: (t: string) => boolean }[] = [
-  { key: "all", label: "Todo", match: () => true },
-  { key: "crypto", label: "Cripto", match: (t) => t === "crypto" },
-  { key: "fci", label: "FCI", match: (t) => t === "fci" },
-  { key: "cuentas", label: "Cuentas", match: (t) => isBoxType(t) },
-  { key: "inmuebles", label: "Inmuebles", match: (t) => isInstallmentType(t) },
-  { key: "deudas", label: "Deudas", match: (t) => isDebtType(t) },
+// Every holding lands in exactly one section, in this order. Only Inversiones
+// can earn anything, so it is the only section that shows a gain.
+const SECTIONS: { key: string; label: string; match: (t: string) => boolean }[] = [
+  {
+    key: "inversiones",
+    label: "Inversiones",
+    match: (t) => !isCashType(t) && !isDebtType(t) && !isOffBalanceType(t),
+  },
+  { key: "liquidez", label: "Liquidez", match: (t) => isCashType(t) },
+  { key: "me-deben", label: "Me deben", match: (t) => isDebtType(t) && !isPayableType(t) },
+  { key: "debo", label: "Debo", match: (t) => isPayableType(t) },
+  { key: "terreno", label: "Terreno", match: (t) => isOffBalanceType(t) },
 ];
+
+// Activo, Valor, % cartera, Ganancia, actions.
+const COLS = 5;
 
 interface Props {
   assets: AssetWithValue[];
@@ -61,7 +69,6 @@ interface Props {
 export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
   const { hidden } = useBalance();
   const router = useRouter();
-  const [tab, setTab] = useState("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState(DEFAULT_SORT);
 
@@ -101,10 +108,13 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
     });
   }
 
-  const shown = assets.filter((a) => TABS.find((t) => t.key === tab)!.match(a.type));
-  const rows = buildRows(shown, sort.key, sort.dir);
+  // Sorting applies inside each section; the sections themselves keep their order.
+  const sections = SECTIONS.map((sec) => {
+    const list = assets.filter((a) => sec.match(a.type));
+    return { ...sec, list, rows: buildRows(list, sort.key, sort.dir) };
+  }).filter((sec) => sec.list.length > 0);
 
-  function toggleGroup(name: string) {
+  function toggle(name: string) {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
@@ -113,13 +123,12 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
     });
   }
 
-  // Totals for the footer summary (sum of the rows currently shown).
   // Value is net of debt, so the Total row reads as net worth.
-  const totalValue = shown.reduce((s, a) => s + a.equity, 0);
-  const totalLiabilities = shown.reduce((s, a) => s + a.liability, 0);
+  const totalValue = assets.reduce((s, a) => s + a.equity, 0);
+  const totalLiabilities = assets.reduce((s, a) => s + a.liability, 0);
   // Cash, debts and cuota ledgers have no return to measure, so they stay out of
   // the P&L totals.
-  const invested = shown.filter(
+  const invested = assets.filter(
     (a) => !isCashType(a.type) && !isDebtType(a.type) && !isOffBalanceType(a.type)
   );
   const totalInvested = invested.reduce((s, a) => s + a.net_invested, 0);
@@ -128,62 +137,95 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
   const totalPct = totalGross > 0 ? (totalGain / totalGross) * 100 : 0;
   const hasInvested = invested.length > 0;
 
+  // Share of net worth, matching the donut. Debts have none.
+  const share = (equity: number) =>
+    totalValue > 0 && equity > 0 ? `${((equity / totalValue) * 100).toFixed(1)}%` : "";
+
   async function handleDelete(id: number) {
     if (!confirm("Eliminar este activo y todas sus transacciones?")) return;
     await fetch(`/api/assets/${id}`, { method: "DELETE" });
     onRefresh();
   }
 
+  /** The figures only some holdings have, as one muted line under the name. */
+  function detail(a: AssetWithValue): string {
+    if (isInstallmentType(a.type)) {
+      const parts = [`precio ${formatMoney(a.purchase_total, a.currency)}`];
+      if (a.installments_total > 0) {
+        parts.unshift(`${a.installments_paid}/${a.installments_total} cuotas`);
+      }
+      return parts.join(" · ");
+    }
+    // A BTC account is a box whose balance is an amount of bitcoin.
+    if (isBtcDenominated(a.currency)) {
+      return `${formatBtc(a.quantity)} · ${centsToUsd(a.current_price)}`;
+    }
+    if (isBoxType(a.type) || isDebtType(a.type)) {
+      return ASSET_TYPES[a.type as AssetType] || a.type;
+    }
+    const parts = [
+      `${formatQuantity(a.quantity)} ${a.symbol}`,
+      formatMoney(a.current_price, a.currency),
+    ];
+    if (a.avg_cost > 0) parts.push(`PPC ${centsToUsd(a.avg_cost)}`);
+    return parts.join(" · ");
+  }
+
+  function gainCell(show: boolean, gain: number, pct: number, strong = false) {
+    return (
+      <td
+        className={cn(
+          "px-4 py-2.5 text-right font-mono",
+          strong && "font-semibold",
+          gain >= 0 ? "text-emerald-400" : "text-red-400"
+        )}
+      >
+        {show && (
+          <>
+            {mask(centsToUsd(gain), hidden)}
+            <span className="ml-1 text-xs opacity-70">{formatPercent(pct)}</span>
+          </>
+        )}
+      </td>
+    );
+  }
+
+  function shareCell(equity: number) {
+    return (
+      <td className="hidden px-4 py-2.5 text-right font-mono text-xs text-muted-foreground sm:table-cell">
+        {share(equity)}
+      </td>
+    );
+  }
+
   function renderRow(a: AssetWithValue, indented: boolean) {
-    const box = isBoxType(a.type);
     const inst = isInstallmentType(a.type);
     const isDebt = isDebtType(a.type);
-    // A BTC account is a box whose balance is a quantity, so it fills the Precio
-    // and Cantidad columns a dollar account leaves empty.
-    const btc = isBtcDenominated(a.currency);
+    const performs = !isDebt && !inst && !isCashType(a.type);
+    // Kept on screen on purpose (an emptied account still has a history), but
+    // it shouldn't weigh as much as the holdings that carry the portfolio.
+    const empty = !inst && a.equity === 0;
     return (
       <tr
         key={a.id}
         onClick={() => router.push(`/activo/${a.id}`)}
-        className="cursor-pointer border-t border-border/60 hover:bg-accent/40"
+        className={cn(
+          "group cursor-pointer border-t border-border/40 hover:bg-accent/40",
+          empty && "opacity-50"
+        )}
       >
-        <td className={cn("px-4 py-3", indented && "pl-10")}>
-          <div className="flex items-center gap-2">
+        <td className={cn("py-2.5 pr-4", indented ? "pl-12" : "pl-8")}>
+          <div className="flex items-baseline gap-2">
             <span className="font-medium">{a.symbol}</span>
-            <span className="hidden text-xs text-muted-foreground sm:inline">{a.name}</span>
-            {!indented && (
-              <Badge variant="secondary" className="text-[10px]">
-                {ASSET_TYPES[a.type as AssetType] || a.type}
-              </Badge>
-            )}
+            <span className="hidden truncate text-xs text-muted-foreground sm:inline">
+              {a.name}
+            </span>
           </div>
-        </td>
-        <td className="px-4 py-3 text-right font-mono text-muted-foreground">
-          {inst
-            ? formatMoney(a.purchase_total, a.currency)
-            : btc
-              ? centsToUsd(a.current_price)
-              : box || isDebt
-                ? "—"
-                : formatMoney(a.current_price, a.currency)}
-        </td>
-        <td className="px-4 py-3 text-right font-mono text-muted-foreground">
-          {box || inst || isDebt || a.avg_cost <= 0 ? "—" : centsToUsd(a.avg_cost)}
-        </td>
-        <td className="px-4 py-3 text-right font-mono text-muted-foreground">
-          {inst
-            ? a.installments_total > 0
-              ? `${a.installments_paid}/${a.installments_total}`
-              : "—"
-            : btc
-              ? formatBtc(a.quantity)
-              : box || isDebt
-                ? "—"
-                : formatQuantity(a.quantity)}
+          <div className="mt-0.5 font-mono text-xs text-muted-foreground/70">{detail(a)}</div>
         </td>
         <td
           className={cn(
-            "px-4 py-3 text-right font-mono font-medium",
+            "px-4 py-2.5 text-right font-mono font-medium",
             a.equity < 0 && "text-red-400"
           )}
         >
@@ -206,23 +248,11 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
             </>
           )}
         </td>
-        <td
-          className={cn(
-            "px-4 py-3 text-right font-mono",
-            a.profit_loss >= 0 ? "text-emerald-400" : "text-red-400"
-          )}
-        >
-          {isDebt || inst ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <>
-              {mask(centsToUsd(a.profit_loss), hidden)}
-              <span className="ml-1 text-xs opacity-70">{formatPercent(a.profit_loss_pct)}</span>
-            </>
-          )}
-        </td>
-        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-end gap-1">
+        {shareCell(inst ? 0 : a.equity)}
+        {gainCell(performs, a.profit_loss, a.profit_loss_pct)}
+        <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+          {/* Revealed on hover; always visible where nothing can hover. */}
+          <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
             <AssetForm asset={a} onSaved={onRefresh} />
             <Button
               variant="ghost"
@@ -238,29 +268,44 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
     );
   }
 
+  function renderGroup(name: string, list: AssetWithValue[]) {
+    const g = groupTotals(list);
+    const open = !collapsed.has(name);
+    return (
+      // Namespaced: groups and assets share one key space.
+      <Fragment key={`group:${name}`}>
+        <tr
+          onClick={() => toggle(name)}
+          className="cursor-pointer border-t border-border/40 hover:bg-accent/40"
+        >
+          <td className="py-2.5 pl-7 pr-4">
+            <div className="flex items-center gap-1.5">
+              {open ? (
+                <ChevronDown size={15} className="text-muted-foreground" />
+              ) : (
+                <ChevronRight size={15} className="text-muted-foreground" />
+              )}
+              <span className="font-medium">{name}</span>
+              <span className="text-xs text-muted-foreground">{list.length} estrategias</span>
+            </div>
+          </td>
+          <td className="px-4 py-2.5 text-right font-mono font-medium">
+            {mask(centsToUsd(g.value), hidden)}
+          </td>
+          {shareCell(g.value)}
+          {gainCell(g.hasPerf, g.gain, g.pct)}
+          <td></td>
+        </tr>
+        {open && list.map((a) => renderRow(a, true))}
+      </Fragment>
+    );
+  }
+
   return (
     <div className="rounded-xl border border-border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
         <h2 className="font-medium">Activos</h2>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex gap-4 text-sm">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={cn(
-                  "border-b-2 pb-1 transition-colors",
-                  tab === t.key
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <OrderForm assets={assets} onSaved={onRefresh} />
-        </div>
+        <OrderForm assets={assets} onSaved={onRefresh} />
       </div>
 
       <div className="overflow-x-auto">
@@ -270,100 +315,95 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
               {COLUMNS.map((c) => {
                 const active = sort.key === c.key;
                 return (
-                  <th
-                    key={c.key}
-                    className={cn("px-4 py-2 font-medium", c.right && "text-right")}
-                  >
-                    <button
-                      onClick={() => sortBy(c.key)}
-                      className={cn(
-                        "inline-flex items-center gap-1 transition-colors hover:text-foreground",
-                        active && "text-foreground"
-                      )}
-                      aria-label={`Ordenar por ${c.label}`}
-                    >
-                      {c.label}
-                      {active &&
-                        (sort.dir === 1 ? (
-                          <ChevronUp size={12} className="text-primary" />
-                        ) : (
-                          <ChevronDown size={12} className="text-primary" />
-                        ))}
-                    </button>
-                  </th>
+                  <Fragment key={c.key}>
+                    {c.key === "profit_loss" && (
+                      <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">
+                        % cartera
+                      </th>
+                    )}
+                    <th className={cn("px-4 py-2 font-medium", c.right && "text-right")}>
+                      <button
+                        onClick={() => sortBy(c.key)}
+                        className={cn(
+                          "inline-flex items-center gap-1 transition-colors hover:text-foreground",
+                          active && "text-foreground"
+                        )}
+                        aria-label={`Ordenar por ${c.label}`}
+                      >
+                        {c.label}
+                        {active &&
+                          (sort.dir === 1 ? (
+                            <ChevronUp size={12} className="text-primary" />
+                          ) : (
+                            <ChevronDown size={12} className="text-primary" />
+                          ))}
+                      </button>
+                    </th>
+                  </Fragment>
                 );
               })}
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
           <tbody>
-            {shown.length === 0 ? (
+            {sections.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
-                  No hay activos en esta categoría.
+                <td colSpan={COLS} className="px-4 py-10 text-center text-muted-foreground">
+                  Todavía no cargaste activos.
                 </td>
               </tr>
             ) : (
-              <>
-                {rows.map((row) => {
-                  if (row.kind === "asset") return renderRow(row.asset, false);
-                  const { name, list } = row;
-                  const t = groupTotals(list);
-                  const open = !collapsed.has(name);
-                  return (
-                    // Namespaced: groups and assets share one key space now.
-                    <Fragment key={`group:${name}`}>
-                      <tr
-                        onClick={() => toggleGroup(name)}
-                        className="cursor-pointer border-t border-border/60 bg-muted/40 hover:bg-accent/40"
-                      >
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1.5">
-                            {open ? (
-                              <ChevronDown size={15} className="text-muted-foreground" />
-                            ) : (
-                              <ChevronRight size={15} className="text-muted-foreground" />
-                            )}
-                            <span className="font-semibold">{name}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {list.length} estrategias
-                            </span>
-                          </div>
-                        </td>
-                        <td colSpan={3}></td>
-                        <td className="px-4 py-3 text-right font-mono font-semibold">
-                          {mask(centsToUsd(t.value), hidden)}
-                        </td>
-                        <td
-                          className={cn(
-                            "px-4 py-3 text-right font-mono font-semibold",
-                            t.gain >= 0 ? "text-emerald-400" : "text-red-400"
-                          )}
-                        >
-                          {t.hasPerf ? (
-                            <>
-                              {mask(centsToUsd(t.gain), hidden)}
-                              <span className="ml-1 text-xs opacity-70">
-                                {formatPercent(t.pct)}
-                              </span>
-                            </>
+              sections.map((sec) => {
+                const key = `section:${sec.key}`;
+                const open = !collapsed.has(key);
+                const t = groupTotals(sec.list);
+                // The terreno is a cuota ledger in ARS: no USD value to subtotal.
+                const offBalance = sec.key === "terreno";
+                return (
+                  <Fragment key={key}>
+                    <tr
+                      onClick={() => toggle(key)}
+                      className="cursor-pointer border-t border-border bg-muted/30 hover:bg-accent/40"
+                    >
+                      <td className="px-4 py-2">
+                        <div className="flex items-center gap-1.5">
+                          {open ? (
+                            <ChevronDown size={14} className="text-muted-foreground" />
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            <ChevronRight size={14} className="text-muted-foreground" />
                           )}
-                        </td>
-                        <td></td>
-                      </tr>
-                      {open && list.map((a) => renderRow(a, true))}
-                    </Fragment>
-                  );
-                })}
-              </>
+                          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            {sec.label}
+                          </span>
+                        </div>
+                      </td>
+                      <td
+                        className={cn(
+                          "px-4 py-2 text-right font-mono font-semibold",
+                          t.value < 0 && "text-red-400"
+                        )}
+                      >
+                        {!offBalance && mask(centsToUsd(t.value), hidden)}
+                      </td>
+                      {shareCell(offBalance ? 0 : t.value)}
+                      {gainCell(sec.key === "inversiones" && t.hasPerf, t.gain, t.pct, true)}
+                      <td></td>
+                    </tr>
+                    {open &&
+                      sec.rows.map((row) =>
+                        row.kind === "asset"
+                          ? renderRow(row.asset, false)
+                          : renderGroup(row.name, row.list)
+                      )}
+                  </Fragment>
+                );
+              })
             )}
           </tbody>
-          {shown.length > 0 && (
+          {assets.length > 0 && (
             <tfoot>
               <tr className="border-t-2 border-primary/30 bg-primary/5 text-sm">
-                <td className="px-4 py-3.5" colSpan={4}>
+                <td className="px-4 py-3.5">
                   <span className="font-semibold uppercase tracking-wide text-primary">
                     Total
                   </span>
@@ -381,19 +421,18 @@ export function HoldingsPanel({ assets, onRefresh, onOpenMovements }: Props) {
                 <td className="px-4 py-3.5 text-right font-mono font-bold">
                   {mask(centsToUsd(totalValue), hidden)}
                 </td>
+                <td className="hidden sm:table-cell"></td>
                 <td
                   className={cn(
                     "px-4 py-3.5 text-right font-mono font-bold",
                     totalGain >= 0 ? "text-emerald-400" : "text-red-400"
                   )}
                 >
-                  {hasInvested ? (
+                  {hasInvested && (
                     <>
                       {mask(centsToUsd(totalGain), hidden)}
                       <span className="ml-1 text-xs opacity-80">{formatPercent(totalPct)}</span>
                     </>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
                   )}
                 </td>
                 <td className="px-4 py-3.5"></td>

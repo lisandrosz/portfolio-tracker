@@ -1,4 +1,4 @@
-import { isCashType, isDebtType, isInstallmentType } from "./constants";
+import { isCashType, isDebtType } from "./constants";
 import type { AssetWithValue } from "@/types";
 
 /**
@@ -15,14 +15,11 @@ export function groupTotals(list: AssetWithValue[]) {
   return { value, gain, gross, pct: gross > 0 ? (gain / gross) * 100 : 0, hasPerf: perf.length > 0 };
 }
 
-export type SortKey = "symbol" | "current_price" | "avg_cost" | "quantity" | "equity" | "profit_loss";
+export type SortKey = "symbol" | "equity" | "profit_loss";
 export type SortDir = 1 | -1;
 
 export const COLUMNS: { key: SortKey; label: string; right?: boolean }[] = [
-  { key: "symbol", label: "Nombre" },
-  { key: "current_price", label: "Precio", right: true },
-  { key: "avg_cost", label: "PPC", right: true },
-  { key: "quantity", label: "Cantidad", right: true },
+  { key: "symbol", label: "Activo" },
   { key: "equity", label: "Valor", right: true },
   { key: "profit_loss", label: "Ganancia", right: true },
 ];
@@ -34,16 +31,7 @@ export const SORT_STORAGE_KEY = "holdings-sort";
 
 /** Sort by what the cell actually shows, so the order matches the column. */
 export function assetSortValue(a: AssetWithValue, key: SortKey): number | string {
-  switch (key) {
-    case "symbol":
-      return a.symbol.toLowerCase();
-    case "current_price":
-      return isInstallmentType(a.type) ? a.purchase_total : a.current_price;
-    case "quantity":
-      return isInstallmentType(a.type) ? a.installments_paid : a.quantity;
-    default:
-      return a[key];
-  }
+  return key === "symbol" ? a.symbol.toLowerCase() : a[key];
 }
 
 export function compareValues(x: number | string, y: number | string, dir: SortDir) {
@@ -62,8 +50,6 @@ export function rowSortValue(row: Row, key: SortKey): number | string {
   if (row.kind === "asset") return assetSortValue(row.asset, key);
   if (key === "symbol") return row.name.toLowerCase();
   const t = groupTotals(row.list);
-  // The heading shows no price, cost or quantity, so those fall back to value —
-  // the only figure a group actually has to be ranked by.
   return key === "profit_loss" ? t.gain : t.value;
 }
 
