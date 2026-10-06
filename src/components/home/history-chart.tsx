@@ -63,6 +63,16 @@ export function HistoryChart({ refreshKey }: Props) {
   const profit = isGain ? (last ? last.gain >= 0 : true) : last ? last.value >= last.invested : true;
   const color = profit ? "#22c55e" : "#ef4444";
 
+  // Gain view: green above zero, red below. The gradient runs over each shape's
+  // own bounding box, so the split sits where zero falls inside the data's
+  // range: from max(gain, 0) down to min(gain, 0), which the baseValue={0} area
+  // and its line both span once the series crosses zero.
+  const gains = data.map((d) => d.gain);
+  const gainMax = Math.max(0, ...gains);
+  const gainMin = Math.min(0, ...gains);
+  const zeroAt = gainMax - gainMin > 0 ? gainMax / (gainMax - gainMin) : 1;
+  const crosses = zeroAt > 0 && zeroAt < 1;
+
   // Auto-scale Y axis to the data range (with padding).
   const series = isGain
     ? data.map((d) => d.gain)
@@ -122,18 +132,28 @@ export function HistoryChart({ refreshKey }: Props) {
       </div>
 
       {data.length < 2 ? (
-        <div className="flex h-[300px] items-center justify-center text-sm text-muted-foreground">
+        <div className="flex h-[400px] items-center justify-center text-sm text-muted-foreground">
           {data.length === 0
             ? "Cargá activos para ver tu evolución"
             : "Acumulando datos… vuelve mañana para ver la curva"}
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={320}>
+        <ResponsiveContainer width="100%" height={400}>
           <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="valueFill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={color} stopOpacity={0.35} />
                 <stop offset="100%" stopColor={color} stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="gainStroke" x1="0" y1="0" x2="0" y2="1">
+                <stop offset={zeroAt} stopColor="#22c55e" />
+                <stop offset={zeroAt} stopColor="#ef4444" />
+              </linearGradient>
+              <linearGradient id="gainFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset={0} stopColor="#22c55e" stopOpacity={0.35} />
+                <stop offset={zeroAt} stopColor="#22c55e" stopOpacity={0.03} />
+                <stop offset={zeroAt} stopColor="#ef4444" stopOpacity={0.03} />
+                <stop offset={1} stopColor="#ef4444" stopOpacity={0.35} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#262630" vertical={false} />
@@ -177,9 +197,9 @@ export function HistoryChart({ refreshKey }: Props) {
                 <Area
                   type="monotone"
                   dataKey="gain"
-                  stroke={color}
+                  stroke={crosses ? "url(#gainStroke)" : color}
                   strokeWidth={2}
-                  fill="url(#valueFill)"
+                  fill={crosses ? "url(#gainFill)" : "url(#valueFill)"}
                   baseValue={0}
                 />
               </>

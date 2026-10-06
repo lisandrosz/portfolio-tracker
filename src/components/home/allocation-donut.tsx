@@ -63,7 +63,7 @@ export function AllocationDonut({ assets, totalValue }: Props) {
               />
             </PieChart>
           </ResponsiveContainer>
-          <div className="flex w-full flex-col gap-2">
+          <div className="grid w-full gap-2 sm:grid-cols-2 sm:gap-x-10">
             {data.map((d, i) => (
               <div key={d.name} className="flex items-center justify-between text-sm">
                 <span className="flex items-center gap-2">

@@ -82,13 +82,11 @@ export default function HomePage() {
           onOpenSettings={() => setSettingsOpen(true)}
         />
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <HistoryChart refreshKey={chartKey} />
-          <AllocationDonut
-            assets={summary?.assets || []}
-            totalValue={summary?.net_worth ?? summary?.total_value ?? 0}
-          />
-        </div>
+        <HistoryChart refreshKey={chartKey} />
+        <AllocationDonut
+          assets={summary?.assets || []}
+          totalValue={summary?.net_worth ?? summary?.total_value ?? 0}
+        />
 
         <HoldingsPanel
           assets={summary?.assets || []}
