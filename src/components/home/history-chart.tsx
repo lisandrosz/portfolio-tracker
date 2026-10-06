@@ -33,7 +33,7 @@ interface Props {
 export function HistoryChart({ refreshKey }: Props) {
   const { hidden } = useBalance();
   const [period, setPeriod] = useState("1M");
-  const [metric, setMetric] = useState<"value" | "gain">("value");
+  const [metric, setMetric] = useState<"value" | "gain">("gain");
   const [snapshots, setSnapshots] = useState<PortfolioSnapshot[]>([]);
 
   const load = useCallback(async () => {
@@ -87,7 +87,7 @@ export function HistoryChart({ refreshKey }: Props) {
         <div className="flex items-center gap-3">
           <h2 className="font-medium">Historia</h2>
           <div className="flex gap-1 rounded-lg bg-muted p-0.5 text-xs">
-            {(["value", "gain"] as const).map((m) => (
+            {(["gain", "value"] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => setMetric(m)}
